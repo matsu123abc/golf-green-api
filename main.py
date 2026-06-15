@@ -225,6 +225,13 @@ def green1():
     margin-top:20px; padding:15px; background:#333; border-radius:8px;
     white-space:pre-wrap; text-align:left;
   }
+  iframe {
+    width:100%;
+    height:400px;
+    border:1px solid #555;
+    border-radius:8px;
+    margin-top:20px;
+  }
 </style>
 </head>
 <body>
@@ -239,6 +246,9 @@ def green1():
 <button id="aiBtn" style="display:none; background:#2196F3;">AI に戦略を聞く</button>
 
 <div id="result"></div>
+
+<h3 style="margin-top:30px;">3D グリーン（参考表示）</h3>
+<iframe src="/green1/3d"></iframe>
 
 <script>
 let selectedX = null;
@@ -293,25 +303,96 @@ aiBtn.addEventListener("click", async function() {
     const res = await fetch("/ai_strategy/1", { method: "POST" });
     const data = await res.json();
 
-    // --- テキスト表示 ---
+    // --- 新仕様：傾斜解説＋戦略のみ表示 ---
     let text = "";
-    text += "📍 最適な落とし所: " + data.best_landing_spot + "\\n\\n";
-    text += "🎯 ライン: " + data.line + "\\n\\n";
-    text += "⚠️ 危険エリア: " + data.danger_zone + "\\n\\n";
-    text += "🧠 戦略: " + data.strategy;
+    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
+    text += "🧠 戦略:\\n" + data.strategy;
 
     document.getElementById("result").innerText = text;
 
-    // グリーン画像を再描画
+    // ピン位置だけ再描画
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+});
+</script>
 
-    // ピン位置（赤）
+</body>
+</html>
+"""
+
+
+<script>
+let selectedX = null;
+let selectedY = null;
+
+const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const saveBtn = document.getElementById("saveBtn");
+const aiBtn = document.getElementById("aiBtn");
+
+const img = new Image();
+img.src = greenImageUrl;
+img.onload = () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+};
+
+canvas.addEventListener("click", function(e) {
+    const rect = canvas.getBoundingClientRect();
+    selectedX = Math.floor((e.clientX - rect.left) / 10);
+    selectedY = Math.floor((e.clientY - rect.top) / 10);
+
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     ctx.beginPath();
     ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
     ctx.fillStyle = "red";
     ctx.fill();
 
+    document.getElementById("info").innerText =
+        `選択中のピン位置: (${selectedX}, ${selectedY})`;
+
+    saveBtn.style.display = "block";
 });
+
+saveBtn.addEventListener("click", async function() {
+    await fetch("/set_pin/1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: selectedX, y: selectedY })
+    });
+
+    document.getElementById("info").innerText =
+        `ピン位置 (${selectedX}, ${selectedY}) を登録しました！`;
+
+    aiBtn.style.display = "block";
+});
+
+aiBtn.addEventListener("click", async function() {
+    document.getElementById("result").innerText = "AI が戦略を計算中です…";
+
+    const res = await fetch("/ai_strategy/1", { method: "POST" });
+    const data = await res.json();
+
+    // --- テキスト表示（新仕様） ---
+    let text = "";
+    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
+    text += "🧠 戦略:\\n" + data.strategy;
+
+    document.getElementById("result").innerText = text;
+
+    // グリーン画像を再描画（ピンだけ表示）
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+});
+
 
 </script>
 
