@@ -103,6 +103,88 @@ def generate_green_1():
     return {"status": "green_1.json generated & uploaded"}
 
 
+@app.get("/pin", response_class=HTMLResponse)
+def pin():
+    return """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Pin Position Setter</title>
+<style>
+  body { margin: 0; background: #222; color: white; text-align: center; }
+  #canvas { touch-action: manipulation; }
+</style>
+</head>
+<body>
+
+<h2>グリーンのピン位置をタップして登録</h2>
+
+<canvas id="canvas" width="360" height="360"></canvas>
+
+<p id="info"></p>
+
+<script>
+// 2D グリーン画像（36×36 の高さマップを色変換した PNG）
+const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// 画像読み込み
+const img = new Image();
+img.src = greenImageUrl;
+img.onload = () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+};
+
+// タップ位置を取得
+canvas.addEventListener("click", function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / 10);  // 360px → 36 グリッド
+    const y = Math.floor((e.clientY - rect.top) / 10);
+
+    // ピン位置を赤丸で描画
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(x * 10, y * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+
+    document.getElementById("info").innerText =
+        `ピン位置: (${x}, ${y}) を登録しました`;
+
+    // サーバーに送信
+    fetch("/set_pin/1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: x, y: y })
+    });
+});
+</script>
+
+</body>
+</html>
+"""
+
+@app.post("/set_pin/{green_id}")
+def set_pin(green_id: int, pos: dict):
+    x = pos["x"]
+    y = pos["y"]
+
+    # green_1.json を読み込み
+    blob_client = container_client.get_blob_client(f"green_{green_id}.json")
+    data = json.loads(blob_client.download_blob().readall())
+
+    # ピン位置を更新
+    data["pin_positions"]["today"] = [x, y]
+
+    # 上書き保存
+    blob_client.upload_blob(json.dumps(data), overwrite=True)
+
+    return {"status": "pin updated", "pin": [x, y]}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
