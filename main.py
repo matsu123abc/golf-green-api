@@ -15,7 +15,7 @@ container_name = os.getenv("GREEN_CONTAINER_NAME")
 
 # Blob 上の画像 URL（例）
 # https://{storage}.blob.core.windows.net/{container}/green_1.png
-BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL")  # ← 環境変数で設定推奨
+BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1")  # ← 環境変数で設定推奨
 
 
 def load_image_from_blob(url: str):
