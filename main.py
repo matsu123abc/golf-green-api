@@ -82,15 +82,15 @@ pin = {pin}
    - ピンの手前・奥の高さ差  
    - どちらが受けているか  
    - どちらが下っているか  
-   - 傾斜ベクトルの向き（例：右下方向に下り）  
-   - 危険方向（球が止まりにくい方向）  
-   - 安全方向（球が止まりやすい方向）
+   - 傾斜ベクトルの向き  
+   - 危険方向  
+   - 安全方向
 
 2. その地形を踏まえた戦略  
-   - どの方向から攻めるべきか（手前/奥/左右）  
-   - その理由（傾斜・高さ差を根拠に）  
-   - 絶対に避けるべき方向  
-   - 球が止まりやすいエリアの特徴  
+   - どの方向から攻めるべきか  
+   - その理由  
+   - 避けるべき方向  
+   - 球が止まりやすいエリア
 
 返答は必ず次の JSON 形式のみで返してください：
 
@@ -118,10 +118,8 @@ pin = {pin}
 
     except Exception as e:
         return {
-            "best_landing_spot": None,
-            "line": "",
-            "danger_zone": "",
-            "strategy": f"GPTエラー: {str(e)}"
+            "slope_analysis": f"GPTエラーが発生しました: {str(e)}",
+            "strategy": "戦略を生成できませんでした。"
         }
 
 
@@ -140,7 +138,14 @@ def ai_strategy_green1():
     if pin is None:
         return {"error": "ピン位置が登録されていません"}
 
-    return gpt_strategy(heights, pin)
+    # GPT に傾斜解析＋戦略を生成させる
+    result = gpt_strategy(heights, pin)
+
+    # 新仕様：返すのは slope_analysis と strategy のみ
+    return {
+        "slope_analysis": result.get("slope_analysis", "解析エラー"),
+        "strategy": result.get("strategy", "戦略エラー")
+    }
 
 
 # ============================================================
