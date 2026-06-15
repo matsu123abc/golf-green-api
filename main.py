@@ -67,8 +67,38 @@ def gpt_strategy(heights, pin):
     )
 
     prompt = f"""
-    ...（プロンプトはそのまま）...
-    """
+あなたはプロキャディです。
+以下は 36×36 のグリーン高低差データです。
+
+heights = {heights}
+pin = {pin}
+
+あなたの役割は「ピン位置の周囲の傾斜を読み取り、地形を詳しく解説し、その地形を踏まえて戦略を立案すること」です。
+
+必ず以下の順番で返答してください：
+
+1. ピン周囲の傾斜の詳細な解説  
+   - ピンの左右の高さ差  
+   - ピンの手前・奥の高さ差  
+   - どちらが受けているか  
+   - どちらが下っているか  
+   - 傾斜ベクトルの向き  
+   - 危険方向  
+   - 安全方向
+
+2. その地形を踏まえた戦略  
+   - どの方向から攻めるべきか  
+   - その理由  
+   - 避けるべき方向  
+   - 球が止まりやすいエリア
+
+返答は必ず次の JSON 形式のみで返してください：
+
+{
+  "slope_analysis": "ここに傾斜の詳細解説",
+  "strategy": "ここに戦略"
+}
+"""
 
     try:
         res = client.chat.completions.create(
@@ -79,9 +109,12 @@ def gpt_strategy(heights, pin):
 
         raw = res.choices[0].message.content.strip()
 
+        # JSON 部分だけ抽出
         json_start = raw.find("{")
         json_end = raw.rfind("}") + 1
         json_text = raw[json_start:json_end]
+
+        # GPT が ```json を付けた場合に備えて除去
         json_text = json_text.replace("```json", "").replace("```", "").strip()
 
         return json.loads(json_text)
