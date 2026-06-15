@@ -7,16 +7,18 @@ import requests
 from io import BytesIO
 from azure.storage.blob import BlobServiceClient
 from fastapi.responses import HTMLResponse
+from openai import AzureOpenAI
 
 app = FastAPI()
 
-# Blob Storage
+# ===== Blob Storage =====
 connection_string = os.getenv("BLOB_CONNECTION_STRING")
 container_name = os.getenv("GREEN_CONTAINER_NAME")
+blob_service = BlobServiceClient.from_connection_string(connection_string)
+container_client = blob_service.get_container_client(container_name)
 
-# Blob 上の画像 URL（例）
-# https://{storage}.blob.core.windows.net/{container}/green_1.png
-BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1")  # ← 環境変数で設定推奨
+# 画像 URL（36×36 の元画像）
+BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1")
 
 
 def load_image_from_blob(url: str):
@@ -48,29 +50,104 @@ def color_to_height(pixel):
     return 0
 
 
+def gpt_strategy(heights, pin):
+
+    client = AzureOpenAI(
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+    )
+
+    prompt = f"""
+あなたはプロキャディです。
+以下は 36×36 のグリーン高低差データです。
+
+heights = {heights}
+pin = {pin}
+grid_width = 36
+grid_height = 36
+
+このデータを使って、以下を計算してください。
+
+1. ピン周囲の傾斜方向（上り/下り）
+2. 最適な落とし所（座標で）
+3. その理由（傾斜・高さ差）
+4. カップインのためのライン（右→左、左→右）
+5. NG エリア（下りが強すぎる場所）
+6. どの方向から攻めるべきか（手前/奥/左右）
+
+返答は必ず次の JSON 形式のみで返してください。
+JSON の前後に説明文や文章を一切付けないこと。
+
+{{
+  "best_landing_spot": [x, y],
+  "line": "右→左に20cm",
+  "danger_zone": "ピン奥3yは急傾斜でNG",
+  "strategy": "左手前から攻めるのが最も安全"
+}}
+"""
+
+    try:
+        res = client.chat.completions.create(
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+
+        raw = res.choices[0].message.content.strip()
+
+        # --- JSON 抽出（gpt_score と同じ方式） ---
+        json_start = raw.find("{")
+        json_end = raw.rfind("}") + 1
+        json_text = raw[json_start:json_end]
+
+        json_text = json_text.replace("```json", "").replace("```", "").strip()
+
+        return json.loads(json_text)
+
+    except Exception as e:
+        return {
+            "best_landing_spot": None,
+            "line": "",
+            "danger_zone": "",
+            "strategy": f"GPTエラー: {str(e)}"
+        }
+
+@app.post("/ai_strategy/1")
+def ai_strategy_green1():
+
+    blob_client = container_client.get_blob_client("green_1.json")
+    data = json.loads(blob_client.download_blob().readall())
+
+    heights = data["heights"]
+    pin = data["pin_positions"].get("today", None)
+
+    if pin is None:
+        return {"error": "ピン位置が登録されていません"}
+
+    result = gpt_strategy(heights, pin)
+
+    return result
+
+# ============================================================
+# ① Green1 JSON 生成（動作確認用）
+# ============================================================
 @app.get("/generate/green/1")
 def generate_green_1():
-    # === 1. Blob から画像読み込み ===
     img = load_image_from_blob(BLOB_IMAGE_URL)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # === 2. 色域マスク（青〜赤） ===
     lower = np.array([10, 30, 30])
     upper = np.array([170, 255, 255])
     mask = cv2.inRange(hsv, lower, upper)
 
-    # === 3. 最大領域（グリーン）抽出 ===
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     largest = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(largest)
 
-    # === 4. 切り抜き ===
     crop = img[y:y+h, x:x+w]
-
-    # === 5. 36×36 にリサイズ ===
     resized = cv2.resize(crop, (36, 36), interpolation=cv2.INTER_AREA)
 
-    # === 6. 色 → 高さ値 ===
     height_map = []
     for row in resized:
         height_row = []
@@ -78,7 +155,6 @@ def generate_green_1():
             height_row.append(color_to_height(pixel))
         height_map.append(height_row)
 
-    # === 7. JSON 生成 ===
     json_data = {
         "green_id": 1,
         "grid_width": 36,
@@ -88,21 +164,15 @@ def generate_green_1():
         "pin_positions": {}
     }
 
-    # ローカル保存
-    with open("green_1.json", "w") as f:
-        json.dump(json_data, f, indent=2)
-
-    # === 8. Blob Storage にアップロード ===
-    blob_service = BlobServiceClient.from_connection_string(connection_string)
-    container = blob_service.get_container_client(container_name)
-    blob = container.get_blob_client("green_1.json")
-
-    with open("green_1.json", "rb") as f:
-        blob.upload_blob(f, overwrite=True)
+    blob = container_client.get_blob_client("green_1.json")
+    blob.upload_blob(json.dumps(json_data), overwrite=True)
 
     return {"status": "green_1.json generated & uploaded"}
 
 
+# ============================================================
+# ② ピン位置タップ登録 UI
+# ============================================================
 @app.get("/pin", response_class=HTMLResponse)
 def pin():
     return """
@@ -125,26 +195,22 @@ def pin():
 <p id="info"></p>
 
 <script>
-// 2D グリーン画像（36×36 の高さマップを色変換した PNG）
 const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// 画像読み込み
 const img = new Image();
 img.src = greenImageUrl;
 img.onload = () => {
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 };
 
-// タップ位置を取得
 canvas.addEventListener("click", function(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / 10);  // 360px → 36 グリッド
+    const x = Math.floor((e.clientX - rect.left) / 10);
     const y = Math.floor((e.clientY - rect.top) / 10);
 
-    // ピン位置を赤丸で描画
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     ctx.beginPath();
     ctx.arc(x * 10, y * 10, 6, 0, Math.PI * 2);
@@ -154,7 +220,6 @@ canvas.addEventListener("click", function(e) {
     document.getElementById("info").innerText =
         `ピン位置: (${x}, ${y}) を登録しました`;
 
-    // サーバーに送信
     fetch("/set_pin/1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,24 +232,94 @@ canvas.addEventListener("click", function(e) {
 </html>
 """
 
+# ============================================================
+# ③ ピン位置保存 API
+# ============================================================
 @app.post("/set_pin/{green_id}")
 def set_pin(green_id: int, pos: dict):
     x = pos["x"]
     y = pos["y"]
 
-    # green_1.json を読み込み
     blob_client = container_client.get_blob_client(f"green_{green_id}.json")
     data = json.loads(blob_client.download_blob().readall())
 
-    # ピン位置を更新
     data["pin_positions"]["today"] = [x, y]
 
-    # 上書き保存
     blob_client.upload_blob(json.dumps(data), overwrite=True)
 
     return {"status": "pin updated", "pin": [x, y]}
 
 
+@app.get("/strategy", response_class=HTMLResponse)
+def strategy():
+    return """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>AI 戦略アドバイス</title>
+<style>
+  body {
+    background: #222;
+    color: white;
+    font-size: 20px;
+    padding: 20px;
+    line-height: 1.6;
+  }
+  button {
+    font-size: 22px;
+    padding: 12px 24px;
+    margin-top: 10px;
+    background: #4CAF50;
+    border: none;
+    color: white;
+    border-radius: 6px;
+  }
+  #result {
+    margin-top: 25px;
+    padding: 15px;
+    background: #333;
+    border-radius: 8px;
+    white-space: pre-wrap;
+  }
+  .title {
+    font-size: 26px;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+
+<div class="title">AI 戦略アドバイス（Green 1）</div>
+
+<button onclick="getStrategy()">AI に戦略を聞く</button>
+
+<div id="result">← ボタンを押すと AI が戦略を表示します</div>
+
+<script>
+async function getStrategy() {
+    document.getElementById("result").innerText = "AI が戦略を計算中です…";
+
+    const res = await fetch("/ai_strategy/1", { method: "POST" });
+    const data = await res.json();
+
+    let text = "";
+    text += "📍 最適な落とし所: " + data.best_landing_spot + "\\n\\n";
+    text += "🎯 ライン: " + data.line + "\\n\\n";
+    text += "⚠️ 危険エリア: " + data.danger_zone + "\\n\\n";
+    text += "🧠 戦略: " + data.strategy;
+
+    document.getElementById("result").innerText = text;
+}
+</script>
+
+</body>
+</html>
+"""
+
+# ============================================================
+# ④ 3D 表示（動作確認用）
+# ============================================================
 @app.get("/", response_class=HTMLResponse)
 def index():
     return """
@@ -250,7 +385,7 @@ async function main() {
 
   const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
- 
+
   function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
