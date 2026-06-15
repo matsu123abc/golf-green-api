@@ -168,10 +168,9 @@ async function main() {
 
   const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
-
+ 
   function animate() {
     requestAnimationFrame(animate);
-    mesh.rotation.z += 0.002;
     renderer.render(scene, camera);
   }
   animate();
