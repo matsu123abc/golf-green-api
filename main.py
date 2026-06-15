@@ -22,7 +22,6 @@ BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1")
 
 
 def load_image_from_blob(url: str):
-    """Blob Storage の PNG を読み込んで OpenCV 画像に変換"""
     response = requests.get(url)
     img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -33,23 +32,22 @@ def color_to_height(pixel):
     b, g, r = pixel
 
     if b > g and b > r:
-        return 0  # 青
-
+        return 0
     if g > r and g > b:
-        return 2  # 緑
-
+        return 2
     if r > b and g > b:
-        return 4  # 黄
-
+        return 4
     if r > g and g > b:
-        return 6  # オレンジ
-
+        return 6
     if r > 150 and g < 80:
-        return 7  # 赤
+        return 7
 
     return 0
 
 
+# ============================================================
+# GPT 戦略ロジック
+# ============================================================
 def gpt_strategy(heights, pin):
 
     client = AzureOpenAI(
@@ -64,8 +62,6 @@ def gpt_strategy(heights, pin):
 
 heights = {heights}
 pin = {pin}
-grid_width = 36
-grid_height = 36
 
 このデータを使って、以下を計算してください。
 
@@ -77,7 +73,6 @@ grid_height = 36
 6. どの方向から攻めるべきか（手前/奥/左右）
 
 返答は必ず次の JSON 形式のみで返してください。
-JSON の前後に説明文や文章を一切付けないこと。
 
 {{
   "best_landing_spot": [x, y],
@@ -96,11 +91,9 @@ JSON の前後に説明文や文章を一切付けないこと。
 
         raw = res.choices[0].message.content.strip()
 
-        # --- JSON 抽出（gpt_score と同じ方式） ---
         json_start = raw.find("{")
         json_end = raw.rfind("}") + 1
         json_text = raw[json_start:json_end]
-
         json_text = json_text.replace("```json", "").replace("```", "").strip()
 
         return json.loads(json_text)
@@ -113,6 +106,10 @@ JSON の前後に説明文や文章を一切付けないこと。
             "strategy": f"GPTエラー: {str(e)}"
         }
 
+
+# ============================================================
+# AI 戦略 API
+# ============================================================
 @app.post("/ai_strategy/1")
 def ai_strategy_green1():
 
@@ -125,12 +122,11 @@ def ai_strategy_green1():
     if pin is None:
         return {"error": "ピン位置が登録されていません"}
 
-    result = gpt_strategy(heights, pin)
+    return gpt_strategy(heights, pin)
 
-    return result
 
 # ============================================================
-# ① Green1 JSON 生成（動作確認用）
+# Green1 JSON 生成
 # ============================================================
 @app.get("/generate/green/1")
 def generate_green_1():
@@ -171,39 +167,60 @@ def generate_green_1():
 
 
 # ============================================================
-# ② ピン位置タップ登録 UI
+# ピン位置保存 API
 # ============================================================
-@app.get("/pin", response_class=HTMLResponse)
-def pin():
+@app.post("/set_pin/{green_id}")
+def set_pin(green_id: int, pos: dict):
+    x = pos["x"]
+    y = pos["y"]
+
+    blob_client = container_client.get_blob_client(f"green_{green_id}.json")
+    data = json.loads(blob_client.download_blob().readall())
+
+    data["pin_positions"]["today"] = [x, y]
+
+    blob_client.upload_blob(json.dumps(data), overwrite=True)
+
+    return {"status": "pin updated", "pin": [x, y]}
+
+
+# ============================================================
+# 起動画面：統合 UI（ピン登録＋AI戦略）
+# ============================================================
+@app.get("/", response_class=HTMLResponse)
+def green1():
     return """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Pin Position Setter</title>
+<title>Green 1 - ピン登録 & AI戦略</title>
 <style>
-  body { margin: 0; background: #222; color: white; text-align: center; }
-  #canvas { touch-action: manipulation; }
+  body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
+  #canvas { touch-action: manipulation; border:1px solid #555; }
+  button {
+    font-size:22px; padding:12px 24px; margin-top:10px;
+    background:#4CAF50; border:none; color:white; border-radius:6px;
+    width:90%;
+  }
+  #result {
+    margin-top:20px; padding:15px; background:#333; border-radius:8px;
+    white-space:pre-wrap; text-align:left;
+  }
 </style>
 </head>
 <body>
 
-<h2>グリーンのピン位置をタップして登録</h2>
+<h2>Green 1 - ピン登録 & AI戦略</h2>
 
 <canvas id="canvas" width="360" height="360"></canvas>
 
 <p id="info">ピン位置をタップしてください</p>
 
-<button id="saveBtn" style="
-  font-size:22px;
-  padding:12px 24px;
-  margin-top:10px;
-  background:#4CAF50;
-  border:none;
-  color:white;
-  border-radius:6px;
-  display:none;
-">この位置を登録する</button>
+<button id="saveBtn" style="display:none;">この位置を登録する</button>
+<button id="aiBtn" style="display:none; background:#2196F3;">AI に戦略を聞く</button>
+
+<div id="result"></div>
 
 <script>
 let selectedX = null;
@@ -214,6 +231,7 @@ const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-m
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const saveBtn = document.getElementById("saveBtn");
+const aiBtn = document.getElementById("aiBtn");
 
 const img = new Image();
 img.src = greenImageUrl;
@@ -235,11 +253,11 @@ canvas.addEventListener("click", function(e) {
     document.getElementById("info").innerText =
         `選択中のピン位置: (${selectedX}, ${selectedY})`;
 
-    saveBtn.style.display = "inline-block";
+    saveBtn.style.display = "block";
 });
 
 saveBtn.addEventListener("click", async function() {
-    const res = await fetch("/set_pin/1", {
+    await fetch("/set_pin/1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ x: selectedX, y: selectedY })
@@ -248,80 +266,10 @@ saveBtn.addEventListener("click", async function() {
     document.getElementById("info").innerText =
         `ピン位置 (${selectedX}, ${selectedY}) を登録しました！`;
 
-    saveBtn.style.display = "none";
+    aiBtn.style.display = "block";
 });
-</script>
 
-</body>
-</html>
-"""
-
-# ============================================================
-# ③ ピン位置保存 API
-# ============================================================
-@app.post("/set_pin/{green_id}")
-def set_pin(green_id: int, pos: dict):
-    x = pos["x"]
-    y = pos["y"]
-
-    blob_client = container_client.get_blob_client(f"green_{green_id}.json")
-    data = json.loads(blob_client.download_blob().readall())
-
-    data["pin_positions"]["today"] = [x, y]
-
-    blob_client.upload_blob(json.dumps(data), overwrite=True)
-
-    return {"status": "pin updated", "pin": [x, y]}
-
-
-@app.get("/strategy", response_class=HTMLResponse)
-def strategy():
-    return """
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<title>AI 戦略アドバイス</title>
-<style>
-  body {
-    background: #222;
-    color: white;
-    font-size: 20px;
-    padding: 20px;
-    line-height: 1.6;
-  }
-  button {
-    font-size: 22px;
-    padding: 12px 24px;
-    margin-top: 10px;
-    background: #4CAF50;
-    border: none;
-    color: white;
-    border-radius: 6px;
-  }
-  #result {
-    margin-top: 25px;
-    padding: 15px;
-    background: #333;
-    border-radius: 8px;
-    white-space: pre-wrap;
-  }
-  .title {
-    font-size: 26px;
-    margin-bottom: 10px;
-  }
-</style>
-</head>
-<body>
-
-<div class="title">AI 戦略アドバイス（Green 1）</div>
-
-<button onclick="getStrategy()">AI に戦略を聞く</button>
-
-<div id="result">← ボタンを押すと AI が戦略を表示します</div>
-
-<script>
-async function getStrategy() {
+aiBtn.addEventListener("click", async function() {
     document.getElementById("result").innerText = "AI が戦略を計算中です…";
 
     const res = await fetch("/ai_strategy/1", { method: "POST" });
@@ -334,18 +282,19 @@ async function getStrategy() {
     text += "🧠 戦略: " + data.strategy;
 
     document.getElementById("result").innerText = text;
-}
+});
 </script>
 
 </body>
 </html>
 """
 
+
 # ============================================================
-# ④ 3D 表示（動作確認用）
+# 3D 表示（確認用）
 # ============================================================
-@app.get("/", response_class=HTMLResponse)
-def index():
+@app.get("/green1/3d", response_class=HTMLResponse)
+def green1_3d():
     return """
 <!DOCTYPE html>
 <html lang="ja">
