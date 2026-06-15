@@ -27,19 +27,29 @@ def load_image_from_blob(url: str):
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     return img
 
-
 def color_to_height(pixel):
     b, g, r = pixel
+    hsv = cv2.cvtColor(np.uint8([[pixel]]), cv2.COLOR_BGR2HSV)[0][0]
+    h, s, v = hsv
 
-    if b > g and b > r:
+    # 青 (H ≈ 100〜130)
+    if 90 <= h <= 130:
         return 0
-    if g > r and g > b:
+
+    # 緑 (H ≈ 40〜85)
+    if 40 <= h <= 85:
         return 2
-    if r > b and g > b:
+
+    # 黄 (H ≈ 20〜35)
+    if 20 <= h <= 35:
         return 4
-    if r > g and g > b:
+
+    # オレンジ (H ≈ 10〜20)
+    if 10 <= h <= 20:
         return 6
-    if r > 150 and g < 80:
+
+    # 赤 (H ≈ 0〜10 or 160〜180)
+    if h < 10 or h > 160:
         return 7
 
     return 0
