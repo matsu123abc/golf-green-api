@@ -82,11 +82,6 @@ pin = {pin}
 5. NG エリア（下りが強すぎる場所）
 6. どの方向から攻めるべきか（手前/奥/左右）
 
-重要：
-- "best_landing_spot" と "strategy" の内容は必ず一致させること。
-- 戦略文には、best_landing_spot がピンに対して「手前/奥/左/右」のどの方向かを必ず含めること。
-- 戦略文は best_landing_spot を根拠にして書くこと。
-
 返答は必ず次の JSON 形式のみで返してください。
 
 {{
@@ -299,9 +294,6 @@ aiBtn.addEventListener("click", async function() {
 
     document.getElementById("result").innerText = text;
 
-    // --- 2D グリーンに AI 落とし所を描画 ---
-    const [lx, ly] = data.best_landing_spot;
-
     // グリーン画像を再描画
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
@@ -311,11 +303,6 @@ aiBtn.addEventListener("click", async function() {
     ctx.fillStyle = "red";
     ctx.fill();
 
-    // AI 落とし所（青）
-    ctx.beginPath();
-    ctx.arc(lx * 10, ly * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "cyan";
-    ctx.fill();
 });
 
 </script>
