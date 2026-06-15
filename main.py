@@ -292,8 +292,8 @@ saveBtn.addEventListener("click", async function() {
     });
 
     document.getElementById("info").innerText =
-        `ピン位置 (${selectedX}, ${selectedY}) を登録しました！`;
-
+        "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
+    
     aiBtn.style.display = "block";
 });
 
@@ -322,84 +322,6 @@ aiBtn.addEventListener("click", async function() {
 </body>
 </html>
 """
-
-
-<script>
-let selectedX = null;
-let selectedY = null;
-
-const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
-
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const saveBtn = document.getElementById("saveBtn");
-const aiBtn = document.getElementById("aiBtn");
-
-const img = new Image();
-img.src = greenImageUrl;
-img.onload = () => {
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-};
-
-canvas.addEventListener("click", function(e) {
-    const rect = canvas.getBoundingClientRect();
-    selectedX = Math.floor((e.clientX - rect.left) / 10);
-    selectedY = Math.floor((e.clientY - rect.top) / 10);
-
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
-
-    document.getElementById("info").innerText =
-        `選択中のピン位置: (${selectedX}, ${selectedY})`;
-
-    saveBtn.style.display = "block";
-});
-
-saveBtn.addEventListener("click", async function() {
-    await fetch("/set_pin/1", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: selectedX, y: selectedY })
-    });
-
-    document.getElementById("info").innerText =
-        `ピン位置 (${selectedX}, ${selectedY}) を登録しました！`;
-
-    aiBtn.style.display = "block";
-});
-
-aiBtn.addEventListener("click", async function() {
-    document.getElementById("result").innerText = "AI が戦略を計算中です…";
-
-    const res = await fetch("/ai_strategy/1", { method: "POST" });
-    const data = await res.json();
-
-    // --- テキスト表示（新仕様） ---
-    let text = "";
-    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
-    text += "🧠 戦略:\\n" + data.strategy;
-
-    document.getElementById("result").innerText = text;
-
-    // グリーン画像を再描画（ピンだけ表示）
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
-});
-
-
-</script>
-
-</body>
-</html>
-"""
-
 
 # ============================================================
 # 3D 表示（確認用）
