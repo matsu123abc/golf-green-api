@@ -6,6 +6,7 @@ import os
 import requests
 from io import BytesIO
 from azure.storage.blob import BlobServiceClient
+from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
@@ -102,6 +103,83 @@ def generate_green_1():
     return {"status": "green_1.json generated & uploaded"}
 
 
-@app.get("/")
-def root():
-    return {"message": "USA FastAPI is running"}
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Green 1 - 3D View</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #222; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+
+<script>
+async function loadGreenData() {
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.json";
+  const res = await fetch(url);
+  return await res.json();
+}
+
+async function main() {
+  const data = await loadGreenData();
+  const heights = data.heights;
+  const W = data.grid_width;
+  const H = data.grid_height;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, -60, 40);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(30, -30, 50);
+  scene.add(light);
+
+  const ambient = new THREE.AmbientLight(0x888888);
+  scene.add(ambient);
+
+  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+
+  const verts = geometry.attributes.position;
+  for (let i = 0; i < verts.count; i++) {
+    const x = i % W;
+    const y = Math.floor(i / W);
+    const h = heights[y][x] * 0.3;
+    verts.setZ(i, h);
+  }
+  verts.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshLambertMaterial({
+    color: 0x55aa55,
+    side: THREE.DoubleSide
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    mesh.rotation.z += 0.002;
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+main();
+</script>
+
+</body>
+</html>
+"""
