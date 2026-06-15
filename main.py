@@ -285,6 +285,7 @@ aiBtn.addEventListener("click", async function() {
     const res = await fetch("/ai_strategy/1", { method: "POST" });
     const data = await res.json();
 
+    // --- テキスト表示 ---
     let text = "";
     text += "📍 最適な落とし所: " + data.best_landing_spot + "\\n\\n";
     text += "🎯 ライン: " + data.line + "\\n\\n";
@@ -292,7 +293,26 @@ aiBtn.addEventListener("click", async function() {
     text += "🧠 戦略: " + data.strategy;
 
     document.getElementById("result").innerText = text;
+
+    // --- 2D グリーンに AI 落とし所を描画 ---
+    const [lx, ly] = data.best_landing_spot;
+
+    // グリーン画像を再描画
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // ピン位置（赤）
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+
+    // AI 落とし所（青）
+    ctx.beginPath();
+    ctx.arc(lx * 10, ly * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "cyan";
+    ctx.fill();
 });
+
 </script>
 
 </body>
