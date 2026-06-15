@@ -1,65 +1,95 @@
-from fastapi import FastAPI
+import os
+import json
+import time
+import logging
+from io import BytesIO
+
 import cv2
 import numpy as np
-import json
-import os
 import requests
-from io import BytesIO
+from json import JSONDecodeError
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+
 from azure.storage.blob import BlobServiceClient
-from fastapi.responses import HTMLResponse
 from openai import AzureOpenAI
 
+# ---------------------------
+# Logging
+# ---------------------------
+logger = logging.getLogger("green_app")
+logging.basicConfig(level=logging.INFO)
+
+# ---------------------------
+# App & Blob setup
+# ---------------------------
 app = FastAPI()
 
-# ===== Blob Storage =====
 connection_string = os.getenv("BLOB_CONNECTION_STRING")
 container_name = os.getenv("GREEN_CONTAINER_NAME")
+if not connection_string or not container_name:
+    logger.warning("BLOB_CONNECTION_STRING or GREEN_CONTAINER_NAME not set in environment")
+
 blob_service = BlobServiceClient.from_connection_string(connection_string)
 container_client = blob_service.get_container_client(container_name)
 
-# 画像 URL（36×36 の元画像）
-BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1")
+BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1", "")
 
-
+# ---------------------------
+# Utility: load image from URL
+# ---------------------------
 def load_image_from_blob(url: str):
-    response = requests.get(url)
-    img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    img_array = np.asarray(bytearray(resp.content), dtype=np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Failed to decode image from blob URL")
     return img
 
-def color_to_height(pixel):
-    b, g, r = pixel
-    hsv = cv2.cvtColor(np.uint8([[pixel]]), cv2.COLOR_BGR2HSV)[0][0]
-    h, s, v = hsv
+# ---------------------------
+# Utility: safe blob JSON load
+# ---------------------------
+def safe_load_json_from_blob(blob_name: str):
+    try:
+        blob_client = container_client.get_blob_client(blob_name)
+        raw = blob_client.download_blob().readall()
+        return json.loads(raw)
+    except Exception as e:
+        logger.exception("Failed to load JSON from blob: %s", blob_name)
+        raise
 
-    # 青 (H ≈ 100〜130)
+# ---------------------------
+# Color -> height mapping
+# ---------------------------
+def color_to_height(pixel):
+    # pixel is BGR
+    b, g, r = int(pixel[0]), int(pixel[1]), int(pixel[2])
+    hsv = cv2.cvtColor(np.uint8([[[b, g, r]]]), cv2.COLOR_BGR2HSV)[0][0]
+    h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
+
+    # Blue (approx)
     if 90 <= h <= 130:
         return 0
-
-    # 緑 (H ≈ 40〜85)
+    # Green
     if 40 <= h <= 85:
         return 2
-
-    # 黄 (H ≈ 20〜35)
+    # Yellow
     if 20 <= h <= 35:
         return 4
-
-    # オレンジ (H ≈ 10〜20)
+    # Orange
     if 10 <= h <= 20:
         return 6
-
-    # 赤 (H ≈ 0〜10 or 160〜180)
+    # Red
     if h < 10 or h > 160:
         return 7
-
     return 0
 
-
-# ============================================================
-# GPT 戦略ロジック
-# ============================================================
-def gpt_strategy(heights, pin):
-
+# ---------------------------
+# GPT 戦略ロジック（堅牢版）
+# ---------------------------
+def gpt_strategy(heights, pin, max_retries=2, retry_delay=1.0, timeout_seconds=30):
     client = AzureOpenAI(
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
@@ -100,63 +130,107 @@ pin = {pin}
 }
 """
 
-    try:
-        res = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
+    attempt = 0
+    last_exception = None
 
-        raw = res.choices[0].message.content.strip()
+    while attempt <= max_retries:
+        try:
+            attempt += 1
+            logger.info("Calling AzureOpenAI (attempt %d)", attempt)
+            res = client.chat.completions.create(
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                # SDK-specific timeout param can be added if supported
+            )
 
-        # JSON 部分だけ抽出
-        json_start = raw.find("{")
-        json_end = raw.rfind("}") + 1
-        json_text = raw[json_start:json_end]
+            raw = res.choices[0].message.content.strip()
+            logger.info("GPT raw response (truncated): %s", raw[:1000])
 
-        # GPT が ```json を付けた場合に備えて除去
-        json_text = json_text.replace("```json", "").replace("```", "").strip()
+            # JSON 部分だけ抽出（堅牢化）
+            json_start = raw.find("{")
+            json_end = raw.rfind("}") + 1
+            if json_start == -1 or json_end == 0 or json_end <= json_start:
+                raise ValueError("GPTレスポンスに JSON 部分が見つかりませんでした。")
 
-        return json.loads(json_text)
+            json_text = raw[json_start:json_end]
+            json_text = json_text.replace("```json", "").replace("```", "").strip()
 
-    except Exception as e:
-        return {
-            "slope_analysis": f"GPTエラーが発生しました: {str(e)}",
-            "strategy": "戦略を生成できませんでした。"
-        }
+            parsed = json.loads(json_text)
 
+            # 最低限のキー検証
+            if not isinstance(parsed, dict):
+                raise ValueError("パース結果がオブジェクトではありません。")
+            if "slope_analysis" not in parsed or "strategy" not in parsed:
+                raise ValueError("必要なキー(slope_analysis/strategy)が含まれていません。")
+
+            return parsed
+
+        except (JSONDecodeError, ValueError) as e:
+            logger.error("JSON parse/validation error: %s", str(e))
+            last_exception = e
+            # 解析エラーはリトライしても改善しない可能性が高い -> break
+            break
+        except Exception as e:
+            logger.exception("GPT call failed on attempt %d: %s", attempt, str(e))
+            last_exception = e
+            if attempt <= max_retries:
+                time.sleep(retry_delay)
+                continue
+            break
+
+    logger.error("gpt_strategy failed after %d attempts", attempt)
+    return {
+        "slope_analysis": f"GPTエラーが発生しました: {str(last_exception)}",
+        "strategy": "戦略を生成できませんでした。"
+    }
 
 # ============================================================
 # AI 戦略 API
 # ============================================================
 @app.post("/ai_strategy/1")
 def ai_strategy_green1():
+    try:
+        data = safe_load_json_from_blob("green_1.json")
+    except Exception as e:
+        logger.exception("Failed to read green_1.json")
+        return JSONResponse(status_code=500, content={"error": "green_1.json を読み込めませんでした"})
 
-    blob_client = container_client.get_blob_client("green_1.json")
-    data = json.loads(blob_client.download_blob().readall())
-
-    heights = data["heights"]
-    pin = data["pin_positions"].get("today", None)
+    heights = data.get("heights")
+    pin = data.get("pin_positions", {}).get("today", None)
 
     if pin is None:
-        return {"error": "ピン位置が登録されていません"}
+        return JSONResponse(status_code=400, content={"error": "ピン位置が登録されていません"})
 
-    # GPT に傾斜解析＋戦略を生成させる
-    result = gpt_strategy(heights, pin)
+    try:
+        result = gpt_strategy(heights, pin)
+    except Exception as e:
+        logger.exception("gpt_strategy raised unexpected exception")
+        return JSONResponse(status_code=500, content={
+            "slope_analysis": f"GPT内部エラー: {str(e)}",
+            "strategy": "戦略を生成できませんでした。"
+        })
 
-    # 新仕様：返すのは slope_analysis と strategy のみ
     return {
         "slope_analysis": result.get("slope_analysis", "解析エラー"),
         "strategy": result.get("strategy", "戦略エラー")
     }
-
 
 # ============================================================
 # Green1 JSON 生成
 # ============================================================
 @app.get("/generate/green/1")
 def generate_green_1():
-    img = load_image_from_blob(BLOB_IMAGE_URL)
+    if not BLOB_IMAGE_URL:
+        logger.error("GREEN_IMAGE_URL_1 not set")
+        raise HTTPException(status_code=500, detail="GREEN_IMAGE_URL_1 が設定されていません")
+
+    try:
+        img = load_image_from_blob(BLOB_IMAGE_URL)
+    except Exception as e:
+        logger.exception("Failed to load image from blob URL")
+        raise HTTPException(status_code=500, detail="画像の読み込みに失敗しました")
+
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
     lower = np.array([10, 30, 30])
@@ -164,6 +238,10 @@ def generate_green_1():
     mask = cv2.inRange(hsv, lower, upper)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        logger.error("No contours found in image")
+        raise HTTPException(status_code=500, detail="グリーン領域が検出できませんでした")
+
     largest = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(largest)
 
@@ -186,29 +264,48 @@ def generate_green_1():
         "pin_positions": {}
     }
 
-    blob = container_client.get_blob_client("green_1.json")
-    blob.upload_blob(json.dumps(json_data), overwrite=True)
+    try:
+        blob = container_client.get_blob_client("green_1.json")
+        blob.upload_blob(json.dumps(json_data), overwrite=True)
+    except Exception as e:
+        logger.exception("Failed to upload green_1.json")
+        raise HTTPException(status_code=500, detail="green_1.json のアップロードに失敗しました")
 
     return {"status": "green_1.json generated & uploaded"}
-
 
 # ============================================================
 # ピン位置保存 API
 # ============================================================
 @app.post("/set_pin/{green_id}")
 def set_pin(green_id: int, pos: dict):
-    x = pos["x"]
-    y = pos["y"]
+    try:
+        x = int(pos.get("x"))
+        y = int(pos.get("y"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="x,y must be integers")
 
-    blob_client = container_client.get_blob_client(f"green_{green_id}.json")
-    data = json.loads(blob_client.download_blob().readall())
+    if not (0 <= x < 36 and 0 <= y < 36):
+        raise HTTPException(status_code=400, detail="x,y out of range (0-35)")
+
+    blob_name = f"green_{green_id}.json"
+    try:
+        data = safe_load_json_from_blob(blob_name)
+    except Exception:
+        raise HTTPException(status_code=500, detail="green JSON を読み込めませんでした")
+
+    if "pin_positions" not in data:
+        data["pin_positions"] = {}
 
     data["pin_positions"]["today"] = [x, y]
 
-    blob_client.upload_blob(json.dumps(data), overwrite=True)
+    try:
+        blob_client = container_client.get_blob_client(blob_name)
+        blob_client.upload_blob(json.dumps(data), overwrite=True)
+    except Exception:
+        logger.exception("Failed to upload updated pin to blob")
+        raise HTTPException(status_code=500, detail="ピン位置の保存に失敗しました")
 
     return {"status": "pin updated", "pin": [x, y]}
-
 
 # ============================================================
 # 起動画面：統合 UI（ピン登録＋AI戦略）
@@ -309,7 +406,18 @@ aiBtn.addEventListener("click", async function() {
     document.getElementById("result").innerText = "AI が戦略を計算中です…";
 
     const res = await fetch("/ai_strategy/1", { method: "POST" });
+    if (!res.ok) {
+      const text = await res.text();
+      document.getElementById("result").innerText = "サーバーエラー: " + text;
+      return;
+    }
+
     const data = await res.json();
+
+    if (!data.slope_analysis || !data.strategy) {
+      document.getElementById("result").innerText = "レスポンス形式が不正です";
+      return;
+    }
 
     // --- 新仕様：傾斜解説＋戦略のみ表示 ---
     let text = "";
