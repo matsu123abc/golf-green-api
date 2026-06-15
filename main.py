@@ -124,10 +124,10 @@ pin = {pin}
 
 返答は必ず次の JSON 形式のみで返してください：
 
-{
+{{
   "slope_analysis": "ここに傾斜の詳細解説",
   "strategy": "ここに戦略"
-}
+}}
 """
 
     attempt = 0
@@ -141,13 +141,11 @@ pin = {pin}
                 model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                # SDK-specific timeout param can be added if supported
             )
 
             raw = res.choices[0].message.content.strip()
             logger.info("GPT raw response (truncated): %s", raw[:1000])
 
-            # JSON 部分だけ抽出（堅牢化）
             json_start = raw.find("{")
             json_end = raw.rfind("}") + 1
             if json_start == -1 or json_end == 0 or json_end <= json_start:
@@ -158,7 +156,6 @@ pin = {pin}
 
             parsed = json.loads(json_text)
 
-            # 最低限のキー検証
             if not isinstance(parsed, dict):
                 raise ValueError("パース結果がオブジェクトではありません。")
             if "slope_analysis" not in parsed or "strategy" not in parsed:
@@ -169,7 +166,6 @@ pin = {pin}
         except (JSONDecodeError, ValueError) as e:
             logger.error("JSON parse/validation error: %s", str(e))
             last_exception = e
-            # 解析エラーはリトライしても改善しない可能性が高い -> break
             break
         except Exception as e:
             logger.exception("GPT call failed on attempt %d: %s", attempt, str(e))
@@ -184,6 +180,7 @@ pin = {pin}
         "slope_analysis": f"GPTエラーが発生しました: {str(last_exception)}",
         "strategy": "戦略を生成できませんでした。"
     }
+
 
 # ============================================================
 # AI 戦略 API
