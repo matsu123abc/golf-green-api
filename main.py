@@ -192,13 +192,28 @@ def pin():
 
 <canvas id="canvas" width="360" height="360"></canvas>
 
-<p id="info"></p>
+<p id="info">ピン位置をタップしてください</p>
+
+<button id="saveBtn" style="
+  font-size:22px;
+  padding:12px 24px;
+  margin-top:10px;
+  background:#4CAF50;
+  border:none;
+  color:white;
+  border-radius:6px;
+  display:none;
+">この位置を登録する</button>
 
 <script>
+let selectedX = null;
+let selectedY = null;
+
 const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const saveBtn = document.getElementById("saveBtn");
 
 const img = new Image();
 img.src = greenImageUrl;
@@ -208,23 +223,32 @@ img.onload = () => {
 
 canvas.addEventListener("click", function(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / 10);
-    const y = Math.floor((e.clientY - rect.top) / 10);
+    selectedX = Math.floor((e.clientX - rect.left) / 10);
+    selectedY = Math.floor((e.clientY - rect.top) / 10);
 
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     ctx.beginPath();
-    ctx.arc(x * 10, y * 10, 6, 0, Math.PI * 2);
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
     ctx.fillStyle = "red";
     ctx.fill();
 
     document.getElementById("info").innerText =
-        `ピン位置: (${x}, ${y}) を登録しました`;
+        `選択中のピン位置: (${selectedX}, ${selectedY})`;
 
-    fetch("/set_pin/1", {
+    saveBtn.style.display = "inline-block";
+});
+
+saveBtn.addEventListener("click", async function() {
+    const res = await fetch("/set_pin/1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: x, y: y })
+        body: JSON.stringify({ x: selectedX, y: selectedY })
     });
+
+    document.getElementById("info").innerText =
+        `ピン位置 (${selectedX}, ${selectedY}) を登録しました！`;
+
+    saveBtn.style.display = "none";
 });
 </script>
 
