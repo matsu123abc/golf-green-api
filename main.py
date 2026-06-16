@@ -425,36 +425,60 @@ def green1():
 <title>Green - ピン登録 & AI戦略</title>
 <style>
   body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
-  /* コントロールを前面に出す */
+
+  /* ★ ホール選択を常に最前面に固定表示 ★ */
   .controls {
-    position: relative;
-    z-index: 50;
-    background: rgba(0,0,0,0.35);
-    padding: 8px;
-    border-radius: 8px;
-    display: inline-block;
-    margin-bottom: 8px;
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: rgba(0,0,0,0.65);
+    padding: 10px 16px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
+
+  .controls label {
+    margin: 0;
+    font-size: 18px;
+    color: #fff;
+  }
+
   select#holeSelect {
-    position: relative;
-    z-index: 60;
-    background: rgba(255,255,255,0.95);
+    background: #fff;
     color: #000;
     border-radius: 6px;
-    padding: 6px;
+    padding: 6px 10px;
     border: 1px solid #666;
-    font-size:18px;
+    font-size: 18px;
+    z-index: 10000;
   }
-  #canvas { touch-action: manipulation; border:1px solid #555; background:#111; position: relative; z-index: 10; }
+
+  /* ★ canvas は controls の下に来るよう margin-top を追加 ★ */
+  #canvas {
+    touch-action: manipulation;
+    border:1px solid #555;
+    background:#111;
+    position: relative;
+    z-index: 10;
+    margin-top: 90px; /* ← controls と重ならないようにする */
+  }
+
   button {
     font-size:22px; padding:12px 24px; margin-top:10px;
     background:#4CAF50; border:none; color:white; border-radius:6px;
     width:90%;
   }
+
   #result {
     margin-top:20px; padding:15px; background:#333; border-radius:8px;
     white-space:pre-wrap; text-align:left;
   }
+
   iframe {
     width:100%;
     height:400px;
@@ -464,23 +488,26 @@ def green1():
     position: relative;
     z-index: 5;
   }
-  label { font-size:18px; display:block; margin:8px 0; color: #fff; }
-  /* 小さい画面での余白調整 */
+
   @media (max-width: 600px) {
-    .controls { width: 100%; box-sizing: border-box; }
-    select#holeSelect { width: 100%; }
-    button { width: 100%; }
+    .controls {
+      width: calc(100% - 20px);
+      left: 10px;
+      transform: none;
+      justify-content: space-between;
+    }
+    select#holeSelect { width: 120px; }
   }
 </style>
 </head>
 <body>
 
-<h2>Green - ピン登録 & AI戦略</h2>
+<h2 style="margin-top:70px;">Green - ピン登録 & AI戦略</h2>
 
-<div class="controls" aria-hidden="false">
-  <label for="holeSelect">ホール選択:
-    <select id="holeSelect"></select>
-  </label>
+<!-- ★ 最前面に固定されたホール選択 ★ -->
+<div class="controls">
+  <label for="holeSelect">ホール選択</label>
+  <select id="holeSelect"></select>
 </div>
 
 <canvas id="canvas" width="360" height="360"></canvas>
@@ -537,8 +564,6 @@ def green1():
     img.onload = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // 既存のピンがあれば表示（非同期で取得して描画する場合はここで処理を追加）
-      // iframe 更新（汎用 3D エンドポイント）
       iframe.src = `/green/3d?hole=${holeId}`;
     };
     img.onerror = () => {
@@ -613,7 +638,6 @@ def green1():
     text += "🧠 戦略:\n" + data.strategy;
     resultDiv.innerText = text;
 
-    // ピン再描画
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     if (selectedX !== null && selectedY !== null) {
       ctx.beginPath();
