@@ -425,7 +425,27 @@ def green1():
 <title>Green - ピン登録 & AI戦略</title>
 <style>
   body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
-  #canvas { touch-action: manipulation; border:1px solid #555; background:#111; }
+  /* コントロールを前面に出す */
+  .controls {
+    position: relative;
+    z-index: 50;
+    background: rgba(0,0,0,0.35);
+    padding: 8px;
+    border-radius: 8px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  select#holeSelect {
+    position: relative;
+    z-index: 60;
+    background: rgba(255,255,255,0.95);
+    color: #000;
+    border-radius: 6px;
+    padding: 6px;
+    border: 1px solid #666;
+    font-size:18px;
+  }
+  #canvas { touch-action: manipulation; border:1px solid #555; background:#111; position: relative; z-index: 10; }
   button {
     font-size:22px; padding:12px 24px; margin-top:10px;
     background:#4CAF50; border:none; color:white; border-radius:6px;
@@ -441,18 +461,27 @@ def green1():
     border:1px solid #555;
     border-radius:8px;
     margin-top:20px;
+    position: relative;
+    z-index: 5;
   }
-  label { font-size:18px; display:block; margin:8px 0; }
-  select { font-size:18px; padding:6px; }
+  label { font-size:18px; display:block; margin:8px 0; color: #fff; }
+  /* 小さい画面での余白調整 */
+  @media (max-width: 600px) {
+    .controls { width: 100%; box-sizing: border-box; }
+    select#holeSelect { width: 100%; }
+    button { width: 100%; }
+  }
 </style>
 </head>
 <body>
 
 <h2>Green - ピン登録 & AI戦略</h2>
 
-<label for="holeSelect">ホール選択:
-  <select id="holeSelect"></select>
-</label>
+<div class="controls" aria-hidden="false">
+  <label for="holeSelect">ホール選択:
+    <select id="holeSelect"></select>
+  </label>
+</div>
 
 <canvas id="canvas" width="360" height="360"></canvas>
 
@@ -508,8 +537,7 @@ def green1():
     img.onload = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // 既存のピンがあれば表示
-      fetch(`/green_${holeId}.json`).then(()=>{}).catch(()=>{});
+      // 既存のピンがあれば表示（非同期で取得して描画する場合はここで処理を追加）
       // iframe 更新（汎用 3D エンドポイント）
       iframe.src = `/green/3d?hole=${holeId}`;
     };
@@ -518,6 +546,7 @@ def green1():
       ctx.fillStyle = "#444";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "white";
+      ctx.font = "16px sans-serif";
       ctx.fillText("画像を読み込めませんでした", 10, 20);
     };
   }
@@ -600,6 +629,7 @@ def green1():
 </body>
 </html>
 """
+
 
 # ============================================================
 # 汎用 3D 表示（クエリでホール指定）
