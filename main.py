@@ -561,12 +561,12 @@ def green1():
     img = new Image();
     img.crossOrigin = "anonymous";
     img.src = url;
-    img.onload = () => {
+    img.onload = function() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      iframe.src = `/green/3d?hole=${holeId}`;
+      iframe.src = "/green/3d?hole=" + holeId;
     };
-    img.onerror = () => {
+    img.onerror = function() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "#444";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -574,6 +574,10 @@ def green1():
       ctx.font = "16px sans-serif";
       ctx.fillText("画像を読み込めませんでした", 10, 20);
     };
+
+    // 既存のピンがあれば表示（非同期で取得して描画する場合はここで処理を追加）
+    // テンプレートリテラルを避けて文字列連結に変更（SyntaxError 回避）
+    fetch("/green_" + holeId + ".json").then(function(){ }).catch(function(){ });
   }
 
   // 初期ロード
@@ -596,14 +600,14 @@ def green1():
     ctx.fillStyle = "red";
     ctx.fill();
 
-    info.innerText = `選択中のピン位置: (${selectedX}, ${selectedY})`;
+    info.innerText = "選択中のピン位置: (" + selectedX + ", " + selectedY + ")";
 
     saveBtn.style.display = "block";
   });
 
   saveBtn.addEventListener("click", async function() {
     if (selectedX === null || selectedY === null) return;
-    const res = await fetch(`/set_pin/${currentHole}`, {
+    const res = await fetch("/set_pin/" + currentHole, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ x: selectedX, y: selectedY })
@@ -620,7 +624,7 @@ def green1():
   aiBtn.addEventListener("click", async function() {
     resultDiv.innerText = "AI が戦略を計算中です…";
 
-    const res = await fetch(`/ai_strategy/${currentHole}`, { method: "POST" });
+    const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
     if (!res.ok) {
       const text = await res.text();
       resultDiv.innerText = "サーバーエラー: " + text;
@@ -633,7 +637,7 @@ def green1():
       return;
     }
 
-    let text = "";
+    var text = "";
     text += "⛰️ 傾斜の解説:\n" + data.slope_analysis + "\n\n";
     text += "🧠 戦略:\n" + data.strategy;
     resultDiv.innerText = text;
