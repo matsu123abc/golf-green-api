@@ -3,13 +3,14 @@ import json
 import time
 import logging
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
 import requests
 from json import JSONDecodeError
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from azure.storage.blob import BlobServiceClient
@@ -34,7 +35,11 @@ if not connection_string or not container_name:
 blob_service = BlobServiceClient.from_connection_string(connection_string)
 container_client = blob_service.get_container_client(container_name)
 
+# 単体用の環境変数（従来互換）
 BLOB_IMAGE_URL = os.getenv("GREEN_IMAGE_URL_1", "")
+
+# 一括生成用パターン（例: https://.../green_{id}.png）
+GREEN_IMAGE_URL_PATTERN = os.getenv("GREEN_IMAGE_URL_PATTERN", "")
 
 # ---------------------------
 # Utility: load image from URL
@@ -181,17 +186,17 @@ pin = {pin}
         "strategy": "戦略を生成できませんでした。"
     }
 
-
 # ============================================================
-# AI 戦略 API
+# AI 戦略 API（汎用）
 # ============================================================
-@app.post("/ai_strategy/1")
-def ai_strategy_green1():
+@app.post("/ai_strategy/{green_id}")
+def ai_strategy_green(green_id: int):
+    blob_name = f"green_{green_id}.json"
     try:
-        data = safe_load_json_from_blob("green_1.json")
+        data = safe_load_json_from_blob(blob_name)
     except Exception as e:
-        logger.exception("Failed to read green_1.json")
-        return JSONResponse(status_code=500, content={"error": "green_1.json を読み込めませんでした"})
+        logger.exception("Failed to read %s", blob_name)
+        return JSONResponse(status_code=500, content={"error": f"{blob_name} を読み込めませんでした"})
 
     heights = data.get("heights")
     pin = data.get("pin_positions", {}).get("today", None)
@@ -214,7 +219,110 @@ def ai_strategy_green1():
     }
 
 # ============================================================
-# Green1 JSON 生成
+# 汎用: 画像から JSON を生成して Blob にアップロードする関数
+# ============================================================
+def generate_green_from_url(green_id: int, url: str):
+    """
+    指定 URL の画像を読み込み、36x36 にリサイズして color_to_height で JSON を作成し
+    Blob に green_{id}.json としてアップロードする。例外は呼び出し元で処理する。
+    """
+    logger.info("Generating green %d from %s", green_id, url)
+    img = load_image_from_blob(url)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    lower = np.array([10, 30, 30])
+    upper = np.array([170, 255, 255])
+    mask = cv2.inRange(hsv, lower, upper)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise ValueError(f"green_{green_id}.png: グリーン領域が検出できませんでした")
+
+    largest = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(largest)
+
+    crop = img[y:y+h, x:x+w]
+    resized = cv2.resize(crop, (36, 36), interpolation=cv2.INTER_AREA)
+
+    height_map = []
+    for row in resized:
+        height_row = []
+        for pixel in row:
+            height_row.append(color_to_height(pixel))
+        height_map.append(height_row)
+
+    json_data = {
+        "green_id": green_id,
+        "grid_width": 36,
+        "grid_height": 36,
+        "cell_size_yards": 1.0,
+        "heights": height_map,
+        "pin_positions": {}
+    }
+
+    blob_name = f"green_{green_id}.json"
+    blob = container_client.get_blob_client(blob_name)
+    blob.upload_blob(json.dumps(json_data), overwrite=True)
+    logger.info("Uploaded %s", blob_name)
+    return {"green_id": green_id, "status": "ok", "blob": blob_name}
+
+# ============================================================
+# 一括生成エンドポイント
+# ============================================================
+@app.get("/generate/greens")
+def generate_greens(start: int = 1, end: int = 18, concurrency: int = Query(None, description="同時処理数")):
+    """
+    一括生成エンドポイント。
+    使用例: /generate/greens?start=1&end=18
+    concurrency: 同時処理数（未指定なら環境変数 GENERATE_CONCURRENCY、無ければ直列）
+    """
+    pattern = GREEN_IMAGE_URL_PATTERN
+    if not pattern:
+        raise HTTPException(status_code=500, detail="GREEN_IMAGE_URL_PATTERN が設定されていません")
+
+    if concurrency is None:
+        try:
+            concurrency = int(os.getenv("GENERATE_CONCURRENCY", "0"))
+        except Exception:
+            concurrency = 0
+
+    ids = list(range(start, end + 1))
+    results = []
+    errors = []
+
+    if concurrency and concurrency > 1:
+        logger.info("Generating greens concurrently: %d workers", concurrency)
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+            future_to_id = {}
+            for gid in ids:
+                # pattern に合わせて id を埋める（必要なら zfill を使う）
+                url = pattern.format(id=gid)
+                future = ex.submit(generate_green_from_url, gid, url)
+                future_to_id[future] = gid
+
+            for fut in as_completed(future_to_id):
+                gid = future_to_id[fut]
+                try:
+                    res = fut.result()
+                    results.append(res)
+                except Exception as e:
+                    logger.exception("Failed to generate green %d", gid)
+                    errors.append({"green_id": gid, "error": str(e)})
+    else:
+        # 直列処理
+        for gid in ids:
+            url = pattern.format(id=gid)
+            try:
+                res = generate_green_from_url(gid, url)
+                results.append(res)
+            except Exception as e:
+                logger.exception("Failed to generate green %d", gid)
+                errors.append({"green_id": gid, "error": str(e)})
+
+    return {"generated": results, "errors": errors}
+
+# ============================================================
+# Green1 JSON 生成（従来互換エンドポイント）
 # ============================================================
 @app.get("/generate/green/1")
 def generate_green_1():
@@ -305,7 +413,7 @@ def set_pin(green_id: int, pos: dict):
     return {"status": "pin updated", "pin": [x, y]}
 
 # ============================================================
-# 起動画面：統合 UI（ピン登録＋AI戦略）
+# 起動画面：統合 UI（ホール選択対応）
 # ============================================================
 @app.get("/", response_class=HTMLResponse)
 def green1():
@@ -314,10 +422,10 @@ def green1():
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Green 1 - ピン登録 & AI戦略</title>
+<title>Green - ピン登録 & AI戦略</title>
 <style>
   body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
-  #canvas { touch-action: manipulation; border:1px solid #555; }
+  #canvas { touch-action: manipulation; border:1px solid #555; background:#111; }
   button {
     font-size:22px; padding:12px 24px; margin-top:10px;
     background:#4CAF50; border:none; color:white; border-radius:6px;
@@ -334,11 +442,17 @@ def green1():
     border-radius:8px;
     margin-top:20px;
   }
+  label { font-size:18px; display:block; margin:8px 0; }
+  select { font-size:18px; padding:6px; }
 </style>
 </head>
 <body>
 
-<h2>Green 1 - ピン登録 & AI戦略</h2>
+<h2>Green - ピン登録 & AI戦略</h2>
+
+<label for="holeSelect">ホール選択:
+  <select id="holeSelect"></select>
+</label>
 
 <canvas id="canvas" width="360" height="360"></canvas>
 
@@ -350,26 +464,74 @@ def green1():
 <div id="result"></div>
 
 <h3 style="margin-top:30px;">3D グリーン（参考表示）</h3>
-<iframe src="/green1/3d"></iframe>
+<iframe id="view3d" src="/green/3d?hole=1"></iframe>
 
 <script>
-let selectedX = null;
-let selectedY = null;
+(function(){
+  // ホール選択を生成
+  const holeSelect = document.getElementById("holeSelect");
+  for (let i = 1; i <= 18; i++) {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.text = "Hole " + i;
+    holeSelect.appendChild(opt);
+  }
 
-const greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
+  let selectedX = null;
+  let selectedY = null;
+  let currentHole = 1;
 
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const saveBtn = document.getElementById("saveBtn");
-const aiBtn = document.getElementById("aiBtn");
+  const IMAGE_URL_PATTERN = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{id}.png";
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const saveBtn = document.getElementById("saveBtn");
+  const aiBtn = document.getElementById("aiBtn");
+  const info = document.getElementById("info");
+  const resultDiv = document.getElementById("result");
+  const iframe = document.getElementById("view3d");
 
-const img = new Image();
-img.src = greenImageUrl;
-img.onload = () => {
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-};
+  let img = new Image();
 
-canvas.addEventListener("click", function(e) {
+  function loadHole(holeId) {
+    currentHole = holeId;
+    selectedX = null;
+    selectedY = null;
+    saveBtn.style.display = "none";
+    aiBtn.style.display = "none";
+    info.innerText = "ピン位置をタップしてください";
+    resultDiv.innerText = "";
+
+    const url = IMAGE_URL_PATTERN.replace("{id}", holeId);
+    img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // 既存のピンがあれば表示
+      fetch(`/green_${holeId}.json`).then(()=>{}).catch(()=>{});
+      // iframe 更新（汎用 3D エンドポイント）
+      iframe.src = `/green/3d?hole=${holeId}`;
+    };
+    img.onerror = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#444";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "white";
+      ctx.fillText("画像を読み込めませんでした", 10, 20);
+    };
+  }
+
+  // 初期ロード
+  loadHole(1);
+  holeSelect.value = "1";
+
+  holeSelect.addEventListener("change", function() {
+    const holeId = parseInt(this.value);
+    loadHole(holeId);
+  });
+
+  canvas.addEventListener("click", function(e) {
     const rect = canvas.getBoundingClientRect();
     selectedX = Math.floor((e.clientX - rect.left) / 10);
     selectedY = Math.floor((e.clientY - rect.top) / 10);
@@ -380,56 +542,59 @@ canvas.addEventListener("click", function(e) {
     ctx.fillStyle = "red";
     ctx.fill();
 
-    document.getElementById("info").innerText =
-        `選択中のピン位置: (${selectedX}, ${selectedY})`;
+    info.innerText = `選択中のピン位置: (${selectedX}, ${selectedY})`;
 
     saveBtn.style.display = "block";
-});
+  });
 
-saveBtn.addEventListener("click", async function() {
-    await fetch("/set_pin/1", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: selectedX, y: selectedY })
+  saveBtn.addEventListener("click", async function() {
+    if (selectedX === null || selectedY === null) return;
+    const res = await fetch(`/set_pin/${currentHole}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: selectedX, y: selectedY })
     });
-
-    document.getElementById("info").innerText =
-        "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
-    
+    if (!res.ok) {
+      const txt = await res.text();
+      info.innerText = "ピン保存エラー: " + txt;
+      return;
+    }
+    info.innerText = "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
     aiBtn.style.display = "block";
-});
+  });
 
-aiBtn.addEventListener("click", async function() {
-    document.getElementById("result").innerText = "AI が戦略を計算中です…";
+  aiBtn.addEventListener("click", async function() {
+    resultDiv.innerText = "AI が戦略を計算中です…";
 
-    const res = await fetch("/ai_strategy/1", { method: "POST" });
+    const res = await fetch(`/ai_strategy/${currentHole}`, { method: "POST" });
     if (!res.ok) {
       const text = await res.text();
-      document.getElementById("result").innerText = "サーバーエラー: " + text;
+      resultDiv.innerText = "サーバーエラー: " + text;
       return;
     }
 
     const data = await res.json();
-
     if (!data.slope_analysis || !data.strategy) {
-      document.getElementById("result").innerText = "レスポンス形式が不正です";
+      resultDiv.innerText = "レスポンス形式が不正です";
       return;
     }
 
-    // --- 新仕様：傾斜解説＋戦略のみ表示 ---
     let text = "";
-    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
-    text += "🧠 戦略:\\n" + data.strategy;
+    text += "⛰️ 傾斜の解説:\n" + data.slope_analysis + "\n\n";
+    text += "🧠 戦略:\n" + data.strategy;
+    resultDiv.innerText = text;
 
-    document.getElementById("result").innerText = text;
-
-    // ピン位置だけ再描画
+    // ピン再描画
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
-});
+    if (selectedX !== null && selectedY !== null) {
+      ctx.beginPath();
+      ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+      ctx.fillStyle = "red";
+      ctx.fill();
+    }
+  });
+
+})();
 </script>
 
 </body>
@@ -437,19 +602,20 @@ aiBtn.addEventListener("click", async function() {
 """
 
 # ============================================================
-# 3D 表示（確認用）
+# 汎用 3D 表示（クエリでホール指定）
 # ============================================================
-@app.get("/green1/3d", response_class=HTMLResponse)
-def green1_3d():
-    return """
+@app.get("/green/3d", response_class=HTMLResponse)
+def green_3d(hole: int = Query(1, ge=1, le=99)):
+    # この HTML はクライアント側で green_{hole}.json を fetch する
+    return f"""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Green 1 - 3D View</title>
+<title>Green {hole} - 3D View</title>
 <style>
-  body { margin: 0; overflow: hidden; background: #222; }
-  canvas { display: block; }
+  body {{ margin: 0; overflow: hidden; background: #222; }}
+  canvas {{ display: block; }}
 </style>
 </head>
 <body>
@@ -457,62 +623,69 @@ def green1_3d():
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 
 <script>
-async function loadGreenData() {
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.json";
-  const res = await fetch(url);
-  return await res.json();
-}
+(async function() {{
+  const hole = {hole};
+  const url = `https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_${{hole}}.json`;
 
-async function main() {
-  const data = await loadGreenData();
-  const heights = data.heights;
-  const W = data.grid_width;
-  const H = data.grid_height;
+  async function loadGreenData() {{
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to load JSON");
+    return await res.json();
+  }}
 
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, -60, 40);
-  camera.lookAt(0, 0, 0);
+  try {{
+    const data = await loadGreenData();
+    const heights = data.heights;
+    const W = data.grid_width;
+    const H = data.grid_height;
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, -60, 40);
+    camera.lookAt(0, 0, 0);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(30, -30, 50);
-  scene.add(light);
+    const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight(0x888888);
-  scene.add(ambient);
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(30, -30, 50);
+    scene.add(light);
 
-  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+    const ambient = new THREE.AmbientLight(0x888888);
+    scene.add(ambient);
 
-  const verts = geometry.attributes.position;
-  for (let i = 0; i < verts.count; i++) {
-    const x = i % W;
-    const y = Math.floor(i / W);
-    const h = heights[y][x] * 0.3;
-    verts.setZ(i, h);
-  }
-  verts.needsUpdate = true;
-  geometry.computeVertexNormals();
+    const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
 
-  const material = new THREE.MeshLambertMaterial({
-    color: 0x55aa55,
-    side: THREE.DoubleSide
-  });
+    const verts = geometry.attributes.position;
+    for (let i = 0; i < verts.count; i++) {{
+      const x = i % W;
+      const y = Math.floor(i / W);
+      const h = heights[y][x] * 0.3;
+      verts.setZ(i, h);
+    }}
+    verts.needsUpdate = true;
+    geometry.computeVertexNormals();
 
-  const mesh = new THREE.Mesh(geometry, material);
-  scene.add(mesh);
+    const material = new THREE.MeshLambertMaterial({{
+      color: 0x55aa55,
+      side: THREE.DoubleSide
+    }});
 
-  function animate() {
-    requestAnimationFrame(animate);
-    renderer.render(scene, camera);
-  }
-  animate();
-}
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
 
-main();
+    function animate() {{
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }}
+    animate();
+  }} catch (err) {{
+    document.body.style.color = "white";
+    document.body.style.padding = "20px";
+    document.body.innerText = "3D データの読み込みに失敗しました: " + err.message;
+  }}
+}})();
 </script>
 
 </body>
