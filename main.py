@@ -426,7 +426,6 @@ def green1():
 <style>
   body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
 
-  /* ★ ホール選択を常に最前面に固定表示 ★ */
   .controls {
     position: fixed;
     top: 10px;
@@ -458,14 +457,13 @@ def green1():
     z-index: 10000;
   }
 
-  /* ★ canvas は controls の下に来るよう margin-top を追加 ★ */
   #canvas {
     touch-action: manipulation;
     border:1px solid #555;
     background:#111;
     position: relative;
     z-index: 10;
-    margin-top: 90px; /* ← controls と重ならないようにする */
+    margin-top: 90px;
   }
 
   button {
@@ -504,7 +502,6 @@ def green1():
 
 <h2 style="margin-top:70px;">Green - ピン登録 & AI戦略</h2>
 
-<!-- ★ 最前面に固定されたホール選択 ★ -->
 <div class="controls">
   <label for="holeSelect">ホール選択</label>
   <select id="holeSelect"></select>
@@ -525,28 +522,28 @@ def green1():
 <script>
 (function(){
   // ホール選択を生成
-  const holeSelect = document.getElementById("holeSelect");
-  for (let i = 1; i <= 18; i++) {
-    const opt = document.createElement("option");
+  var holeSelect = document.getElementById("holeSelect");
+  for (var i = 1; i <= 18; i++) {
+    var opt = document.createElement("option");
     opt.value = i;
     opt.text = "Hole " + i;
     holeSelect.appendChild(opt);
   }
 
-  let selectedX = null;
-  let selectedY = null;
-  let currentHole = 1;
+  var selectedX = null;
+  var selectedY = null;
+  var currentHole = 1;
 
-  const IMAGE_URL_PATTERN = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{id}.png";
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
-  const saveBtn = document.getElementById("saveBtn");
-  const aiBtn = document.getElementById("aiBtn");
-  const info = document.getElementById("info");
-  const resultDiv = document.getElementById("result");
-  const iframe = document.getElementById("view3d");
+  var IMAGE_URL_PATTERN = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{id}.png";
+  var canvas = document.getElementById("canvas");
+  var ctx = canvas.getContext("2d");
+  var saveBtn = document.getElementById("saveBtn");
+  var aiBtn = document.getElementById("aiBtn");
+  var info = document.getElementById("info");
+  var resultDiv = document.getElementById("result");
+  var iframe = document.getElementById("view3d");
 
-  let img = new Image();
+  var img = new Image();
 
   function loadHole(holeId) {
     currentHole = holeId;
@@ -557,7 +554,7 @@ def green1():
     info.innerText = "ピン位置をタップしてください";
     resultDiv.innerText = "";
 
-    const url = IMAGE_URL_PATTERN.replace("{id}", holeId);
+    var url = IMAGE_URL_PATTERN.replace("{id}", holeId);
     img = new Image();
     img.crossOrigin = "anonymous";
     img.src = url;
@@ -576,8 +573,12 @@ def green1():
     };
 
     // 既存のピンがあれば表示（非同期で取得して描画する場合はここで処理を追加）
-    // テンプレートリテラルを避けて文字列連結に変更（SyntaxError 回避）
-    fetch("/green_" + holeId + ".json").then(function(){ }).catch(function(){ });
+    try {
+      fetch("/green_" + holeId + ".json").then(function(){ }).catch(function(){ });
+    } catch (e) {
+      // fetch がブロックされる環境でも落ちないように保護
+      console.warn("fetch error:", e);
+    }
   }
 
   // 初期ロード
@@ -585,12 +586,12 @@ def green1():
   holeSelect.value = "1";
 
   holeSelect.addEventListener("change", function() {
-    const holeId = parseInt(this.value);
+    var holeId = parseInt(this.value, 10);
     loadHole(holeId);
   });
 
   canvas.addEventListener("click", function(e) {
-    const rect = canvas.getBoundingClientRect();
+    var rect = canvas.getBoundingClientRect();
     selectedX = Math.floor((e.clientX - rect.left) / 10);
     selectedY = Math.floor((e.clientY - rect.top) / 10);
 
@@ -605,50 +606,60 @@ def green1():
     saveBtn.style.display = "block";
   });
 
-  saveBtn.addEventListener("click", async function() {
+  saveBtn.addEventListener("click", function() {
     if (selectedX === null || selectedY === null) return;
-    const res = await fetch("/set_pin/" + currentHole, {
+    var payload = { x: selectedX, y: selectedY };
+    fetch("/set_pin/" + currentHole, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x: selectedX, y: selectedY })
+      body: JSON.stringify(payload)
+    }).then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(txt){
+          info.innerText = "ピン保存エラー: " + txt;
+        });
+      }
+      info.innerText = "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
+      aiBtn.style.display = "block";
+    }).catch(function(err){
+      info.innerText = "ピン保存エラー: " + err;
     });
-    if (!res.ok) {
-      const txt = await res.text();
-      info.innerText = "ピン保存エラー: " + txt;
-      return;
-    }
-    info.innerText = "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
-    aiBtn.style.display = "block";
   });
 
-  aiBtn.addEventListener("click", async function() {
+  aiBtn.addEventListener("click", function() {
     resultDiv.innerText = "AI が戦略を計算中です…";
 
-    const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
-    if (!res.ok) {
-      const text = await res.text();
-      resultDiv.innerText = "サーバーエラー: " + text;
-      return;
-    }
+    fetch("/ai_strategy/" + currentHole, { method: "POST" })
+    .then(function(res){
+      if (!res.ok) {
+        return res.text().then(function(text){
+          resultDiv.innerText = "サーバーエラー: " + text;
+        });
+      }
+      return res.json();
+    })
+    .then(function(data){
+      if (!data) return;
+      if (!data.slope_analysis || !data.strategy) {
+        resultDiv.innerText = "レスポンス形式が不正です";
+        return;
+      }
+      var text = "";
+      text += "⛰️ 傾斜の解説:\n" + data.slope_analysis + "\n\n";
+      text += "🧠 戦略:\n" + data.strategy;
+      resultDiv.innerText = text;
 
-    const data = await res.json();
-    if (!data.slope_analysis || !data.strategy) {
-      resultDiv.innerText = "レスポンス形式が不正です";
-      return;
-    }
-
-    var text = "";
-    text += "⛰️ 傾斜の解説:\n" + data.slope_analysis + "\n\n";
-    text += "🧠 戦略:\n" + data.strategy;
-    resultDiv.innerText = text;
-
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    if (selectedX !== null && selectedY !== null) {
-      ctx.beginPath();
-      ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-      ctx.fillStyle = "red";
-      ctx.fill();
-    }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (selectedX !== null && selectedY !== null) {
+        ctx.beginPath();
+        ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "red";
+        ctx.fill();
+      }
+    })
+    .catch(function(err){
+      resultDiv.innerText = "サーバーエラー: " + err;
+    });
   });
 
 })();
@@ -672,76 +683,99 @@ def green_3d(hole: int = Query(1, ge=1, le=99)):
 <meta charset="UTF-8">
 <title>Green {hole} - 3D View</title>
 <style>
-  body {{ margin: 0; overflow: hidden; background: #222; }}
-  canvas {{ display: block; }}
+  html, body {{ margin: 0; height: 100%; background: #222; color: #fff; }}
+  #container {{ width: 100vw; height: 100vh; overflow: hidden; }}
+  .error {{ padding: 20px; font-size: 18px; }}
 </style>
 </head>
 <body>
+<div id="container"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<!-- ES Module 版の three を読み込む -->
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
 
-<script>
 (async function() {{
   const hole = {hole};
-  const url = `https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_${{hole}}.json`;
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + hole + ".json";
 
   async function loadGreenData() {{
     const res = await fetch(url);
-    if (!res.ok) throw new Error("Failed to load JSON");
+    if (!res.ok) throw new Error("Failed to load JSON: " + res.status);
     return await res.json();
   }}
 
   try {{
     const data = await loadGreenData();
     const heights = data.heights;
-    const W = data.grid_width;
-    const H = data.grid_height;
+    const W = data.grid_width || 36;
+    const H = data.grid_height || 36;
+
+    const container = document.getElementById('container');
 
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x222222);
+
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, -60, 40);
     camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    container.appendChild(renderer.domElement);
 
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(30, -30, 50);
-    scene.add(light);
+    const dir = new THREE.DirectionalLight(0xffffff, 1);
+    dir.position.set(30, -30, 50);
+    scene.add(dir);
 
     const ambient = new THREE.AmbientLight(0x888888);
     scene.add(ambient);
 
-    const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+    // 平面ジオメトリ（グリッドに合わせる）
+    const geometry = new THREE.PlaneGeometry(W, H, W - 1, H - 1);
+    const pos = geometry.attributes.position;
 
-    const verts = geometry.attributes.position;
-    for (let i = 0; i < verts.count; i++) {{
+    for (let i = 0; i < pos.count; i++) {{
       const x = i % W;
       const y = Math.floor(i / W);
-      const h = heights[y][x] * 0.3;
-      verts.setZ(i, h);
+      const h = (heights && heights[y] && heights[y][x]) ? heights[y][x] * 0.3 : 0;
+      pos.setZ(i, h);
     }}
-    verts.needsUpdate = true;
+    pos.needsUpdate = true;
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshLambertMaterial({{
-      color: 0x55aa55,
-      side: THREE.DoubleSide
-    }});
-
+    const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, side: THREE.DoubleSide }});
     const mesh = new THREE.Mesh(geometry, material);
+    // 平面を見やすく回転（XZ 平面に合わせる）
+    mesh.rotation.x = -Math.PI / 2;
     scene.add(mesh);
 
+    // 軸やグリッド（任意）
+    const grid = new THREE.GridHelper(Math.max(W, H), Math.max(W, H), 0x444444, 0x222222);
+    scene.add(grid);
+
+    // シンプルな回転アニメーション
     function animate() {{
       requestAnimationFrame(animate);
       renderer.render(scene, camera);
     }}
     animate();
+
+    // リサイズ対応
+    window.addEventListener('resize', function() {{
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }});
   }} catch (err) {{
-    document.body.style.color = "white";
-    document.body.style.padding = "20px";
-    document.body.innerText = "3D データの読み込みに失敗しました: " + err.message;
+    const container = document.getElementById('container');
+    container.innerHTML = '';
+    const div = document.createElement('div');
+    div.className = 'error';
+    div.innerText = '3D データの読み込みに失敗しました: ' + err.message;
+    container.appendChild(div);
+    console.error(err);
   }}
 }})();
 </script>
