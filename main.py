@@ -586,45 +586,60 @@ def green_3d(green_id: int):
 <head>
 <meta charset="UTF-8">
 <title>Green {green_id} - 3D View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body {{ margin: 0; overflow: hidden; background: #222; }}
+  body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
   canvas {{ display: block; }}
+  .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
 </style>
 </head>
 <body>
 
-<!-- Three.js を安定 CDN に変更（jsDelivr → unpkg） -->
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
+console.log("3D page loaded for green {green_id}");
+
 async function loadGreenData() {{
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
   try {{
     const res = await fetch(url);
-    return await res.json();
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json();
+    return j;
   }} catch (e) {{
-    document.body.innerHTML = "<p style='color:white'>JSON 読み込み失敗: " + e + "</p>";
+    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    console.error("Failed to load JSON:", e);
     throw e;
   }}
 }}
 
 async function main() {{
-  const data = await loadGreenData();
-  const heights = data.heights;
-  const W = data.grid_width;
-  const H = data.grid_height;
-
-  if (!heights || heights.length === 0) {{
-    document.body.innerHTML = "<p style='color:white'>heights が空です</p>";
+  let data;
+  try {{
+    data = await loadGreenData();
+  }} catch (e) {{
     return;
   }}
 
+  const heights = data.heights;
+  const W = data.grid_width || 36;
+  const H = data.grid_height || 36;
+
+  if (!Array.isArray(heights) || heights.length === 0) {{
+    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
+    console.error("Invalid heights:", heights);
+    return;
+  }}
+
+  // Three.js 初期化
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, -60, 40);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
@@ -643,7 +658,8 @@ async function main() {{
     const y = Math.floor(i / W);
 
     if (!heights[y] || heights[y][x] === undefined) {{
-      console.error("heights out of range", x, y);
+      console.warn("heights out of range at", x, y);
+      verts.setZ(i, 0);
       continue;
     }}
 
@@ -653,15 +669,26 @@ async function main() {{
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshLambertMaterial({ color: 0x55aa55, side: THREE.DoubleSide });
+  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, side: THREE.DoubleSide }});
   const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
+
+  // 軽い回転で視認性を向上（必要なければ削除）
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.rotation.z = Math.PI;
 
   function animate() {{
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }}
   animate();
+
+  // リサイズ対応
+  window.addEventListener('resize', () => {{
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }});
 }}
 
 main();
