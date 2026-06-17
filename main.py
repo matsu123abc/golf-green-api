@@ -579,63 +579,34 @@ toggle3d.addEventListener("click", function(){
 # 3D 表示（汎用：1〜18）
 # ============================================================
 @app.get("/green/{green_id}/3d", response_class=HTMLResponse)
-def green_3d(green_id: int):
+def green_3d(flat_green_id: int):
     return f"""
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-<meta charset="UTF-8">
-<title>Green {green_id} - 3D View</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
-  canvas {{ display: block; }}
-  .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
-</style>
+<head><meta charset="UTF-8"><title>Green {flat_green_id} - 3D View (Flat)</title>
+<style>body{{margin:0;background:#222;color:#fff}}canvas{{display:block}}</style>
 </head>
 <body>
-
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
-
 <script>
-console.log("3D page loaded for green {green_id}");
-
 async function loadGreenData() {{
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
-  try {{
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const j = await res.json();
-    return j;
-  }} catch (e) {{
-    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
-    console.error("Failed to load JSON:", e);
-    throw e;
-  }}
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{flat_green_id}.json";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return await res.json();
 }}
 
 async function main() {{
-  let data;
-  try {{
-    data = await loadGreenData();
-  }} catch (e) {{
-    return;
-  }}
-
+  const data = await loadGreenData();
   const heights = data.heights;
   const W = data.grid_width || 36;
   const H = data.grid_height || 36;
 
-  if (!Array.isArray(heights) || heights.length === 0) {{
-    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
-    console.error("Invalid heights:", heights);
-    return;
-  }}
-
-  // Three.js 初期化
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, -60, 40);
+
+  // カメラ：遠くから真上寄りに見る（パースは残すが平面的に見える）
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+  camera.position.set(0, -120, 200); // Y を下げて Z を上げる（遠景・俯瞰）
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
@@ -643,39 +614,36 @@ async function main() {{
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(30, -30, 50);
+  const light = new THREE.DirectionalLight(0xffffff, 1.0);
+  light.position.set(50, -50, 100);
   scene.add(light);
+  scene.add(new THREE.AmbientLight(0x888888));
 
-  const ambient = new THREE.AmbientLight(0x888888);
-  scene.add(ambient);
-
+  // ジオメトリ（高さスケールを小さくして平坦化）
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-
   const verts = geometry.attributes.position;
+  const HEIGHT_SCALE = 0.08; // ← ここを小さくするほど平面的になる
+
   for (let i = 0; i < verts.count; i++) {{
     const x = i % W;
     const y = Math.floor(i / W);
-
-    if (!heights[y] || heights[y][x] === undefined) {{
-      console.warn("heights out of range at", x, y);
-      verts.setZ(i, 0);
-      continue;
-    }}
-
-    const h = heights[y][x] * 0.3;
+    const h = (heights[y] && heights[y][x] !== undefined) ? heights[y][x] * HEIGHT_SCALE : 0;
     verts.setZ(i, h);
   }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, side: THREE.DoubleSide }});
+  // マテリアル：フラット寄りにして色を見やすく
+  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, flatShading: false }});
   const mesh = new THREE.Mesh(geometry, material);
+  // 平面的に見せるため回転は最小限（ここでは X 回転を小さく）
+  mesh.rotation.x = -Math.PI / 2; // 平面を上向きに
   scene.add(mesh);
 
-  // 軽い回転で視認性を向上（必要なければ削除）
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.rotation.z = Math.PI;
+  // オプション：ワイヤーフレームや輪郭を薄く重ねると平面感が出る
+  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({{ color:0x003300, wireframe:true, opacity:0.25, transparent:true }}));
+  wire.rotation.x = -Math.PI / 2;
+  scene.add(wire);
 
   function animate() {{
     requestAnimationFrame(animate);
@@ -683,7 +651,6 @@ async function main() {{
   }}
   animate();
 
-  // リサイズ対応
   window.addEventListener('resize', () => {{
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -691,9 +658,12 @@ async function main() {{
   }});
 }}
 
-main();
+main().catch(e => {{
+  document.body.innerHTML = "<div style='color:white;padding:20px'>3D エラー: " + e + "</div>";
+  console.error(e);
+}});
 </script>
-
 </body>
 </html>
 """
+
