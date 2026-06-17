@@ -593,13 +593,19 @@ def green_3d(green_id: int):
 </head>
 <body>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<!-- Three.js を安定 CDN に変更（jsDelivr → unpkg） -->
+<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
 async function loadGreenData() {{
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
-  const res = await fetch(url);
-  return await res.json();
+  try {{
+    const res = await fetch(url);
+    return await res.json();
+  }} catch (e) {{
+    document.body.innerHTML = "<p style='color:white'>JSON 読み込み失敗: " + e + "</p>";
+    throw e;
+  }}
 }}
 
 async function main() {{
@@ -608,12 +614,17 @@ async function main() {{
   const W = data.grid_width;
   const H = data.grid_height;
 
+  if (!heights || heights.length === 0) {{
+    document.body.innerHTML = "<p style='color:white'>heights が空です</p>";
+    return;
+  }}
+
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, -60, 40);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
@@ -630,17 +641,19 @@ async function main() {{
   for (let i = 0; i < verts.count; i++) {{
     const x = i % W;
     const y = Math.floor(i / W);
+
+    if (!heights[y] || heights[y][x] === undefined) {{
+      console.error("heights out of range", x, y);
+      continue;
+    }}
+
     const h = heights[y][x] * 0.3;
     verts.setZ(i, h);
   }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshLambertMaterial({{
-    color: 0x55aa55,
-    side: THREE.DoubleSide
-  }});
-
+  const material = new THREE.MeshLambertMaterial({ color: 0x55aa55, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
 
