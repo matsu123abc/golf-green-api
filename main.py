@@ -315,35 +315,120 @@ def green_ui():
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Green - ピン登録 & AI戦略</title>
+
 <style>
-  body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
-  #canvas { touch-action: manipulation; border:1px solid #555; }
-  button {
-    font-size:22px; padding:12px 24px; margin-top:10px;
-    background:#4CAF50; border:none; color:white; border-radius:6px;
-    width:90%;
+  :root{
+    --bg:#111;
+    --panel:#1b1b1b;
+    --accent:#2196F3;
+    --ok:#4CAF50;
+    --text:#fff;
+    --touch:56px;
   }
-  #result {
-    margin-top:20px; padding:15px; background:#333; border-radius:8px;
-    white-space:pre-wrap; text-align:left;
+
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
+    padding:10px;
   }
-  iframe {
+
+  .header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:10px;
+  }
+
+  .title{
+    font-size:18px;
+    margin:0;
+  }
+
+  .map-wrap{
     width:100%;
-    height:400px;
+    display:flex;
+    justify-content:center;
+  }
+
+  canvas#canvas{
+    width:100%;
+    max-width:420px;
+    height:auto;
     border:1px solid #555;
     border-radius:8px;
-    margin-top:20px;
+    background:#000;
+    touch-action:manipulation;
+  }
+
+  #result{
+    margin-top:10px;
+    padding:12px;
+    background:var(--panel);
+    border-radius:8px;
+    font-size:14px;
+    white-space:pre-wrap;
+    text-align:left;
+    max-height:28vh;
+    overflow:auto;
+  }
+
+  .action-bar{
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:env(safe-area-inset-bottom, 0);
+    display:flex;
+    gap:8px;
+    padding:8px;
+    background:rgba(0,0,0,0.6);
+    justify-content:center;
+    z-index:9999;
+  }
+
+  .btn{
+    height:var(--touch);
+    min-width:44%;
+    border-radius:10px;
+    font-size:18px;
+    border:none;
+    color:var(--text);
+  }
+
+  .btn-save{ background:var(--ok); }
+  .btn-ai{ background:var(--accent); }
+
+  #toggle3d{
+    margin-top:10px;
+    width:100%;
+    max-width:420px;
+    background:#333;
+    color:#fff;
+    border-radius:8px;
+    padding:10px;
+    border:none;
+  }
+
+  iframe{
+    width:100%;
+    max-width:420px;
+    height:260px;
+    border-radius:8px;
+    border:1px solid #555;
+    display:none;
+    margin-top:8px;
   }
 </style>
 </head>
+
 <body>
 
-<h2>Green - ピン登録 & AI戦略</h2>
-
-<div style="margin: 10px;">
-  <label for="holeSelect">ホール選択：</label>
-  <select id="holeSelect" style="font-size:20px; padding:4px;">
+<div class="header">
+  <h2 class="title">Green - ピン登録 & AI戦略</h2>
+  <select id="holeSelect" style="font-size:16px; padding:6px;">
     <option value="1">Hole 1</option>
     <option value="2">Hole 2</option>
     <option value="3">Hole 3</option>
@@ -365,17 +450,21 @@ def green_ui():
   </select>
 </div>
 
-<canvas id="canvas" width="360" height="360"></canvas>
+<div class="map-wrap">
+  <canvas id="canvas" width="360" height="360"></canvas>
+</div>
 
-<p id="info">ピン位置をタップしてください</p>
-
-<button id="saveBtn" style="display:none;">この位置を登録する</button>
-<button id="aiBtn" style="display:none; background:#2196F3;">AI に戦略を聞く</button>
+<p id="info" style="font-size:14px;">ピン位置をタップしてください</p>
 
 <div id="result"></div>
 
-<h3 style="margin-top:30px;">3D グリーン（参考表示）</h3>
+<button id="toggle3d">3D 表示を開く</button>
 <iframe id="view3d" src="/green/1/3d"></iframe>
+
+<div class="action-bar">
+  <button id="saveBtn" class="btn btn-save" style="display:none;">登録</button>
+  <button id="aiBtn" class="btn btn-ai" style="display:none;">AI戦略</button>
+</div>
 
 <script>
 let selectedX = null;
@@ -390,91 +479,87 @@ const ctx = canvas.getContext("2d");
 const saveBtn = document.getElementById("saveBtn");
 const aiBtn = document.getElementById("aiBtn");
 const iframe = document.getElementById("view3d");
+const toggle3d = document.getElementById("toggle3d");
 
 const img = new Image();
 img.src = greenImageUrl;
-img.onload = () => {
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-};
+img.onload = () => redraw();
+
+function redraw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  if(selectedX !== null){
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
+  }
+}
 
 holeSelect.addEventListener("change", function() {
-    currentHole = parseInt(this.value);
+  currentHole = parseInt(this.value);
+  greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
+  img.src = greenImageUrl;
 
-    greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
-    img.src = greenImageUrl;
+  iframe.src = "/green/" + currentHole + "/3d";
 
-    iframe.src = "/green/" + currentHole + "/3d";
-
-    selectedX = null;
-    selectedY = null;
-    saveBtn.style.display = "none";
-    aiBtn.style.display = "none";
-    document.getElementById("info").innerText = "ピン位置をタップしてください";
-    document.getElementById("result").innerText = "";
-
-    img.onload = () => {
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    };
+  selectedX = null;
+  selectedY = null;
+  saveBtn.style.display = "none";
+  aiBtn.style.display = "none";
+  document.getElementById("info").innerText = "ピン位置をタップしてください";
+  document.getElementById("result").innerText = "";
 });
 
 canvas.addEventListener("click", function(e) {
-    const rect = canvas.getBoundingClientRect();
-    selectedX = Math.floor((e.clientX - rect.left) / 10);
-    selectedY = Math.floor((e.clientY - rect.top) / 10);
+  const rect = canvas.getBoundingClientRect();
+  selectedX = Math.floor((e.clientX - rect.left) / 10);
+  selectedY = Math.floor((e.clientY - rect.top) / 10);
 
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
+  redraw();
 
-    document.getElementById("info").innerText =
-        `選択中のピン位置: (${selectedX}, ${selectedY})`;
+  document.getElementById("info").innerText =
+      `選択中のピン位置: (${selectedX}, ${selectedY})`;
 
-    saveBtn.style.display = "block";
+  saveBtn.style.display = "block";
 });
 
 saveBtn.addEventListener("click", async function() {
-    await fetch("/set_pin/" + currentHole, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: selectedX, y: selectedY })
-    });
+  await fetch("/set_pin/" + currentHole, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: selectedX, y: selectedY })
+  });
 
-    document.getElementById("info").innerText =
-        "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
-    
-    aiBtn.style.display = "block";
+  document.getElementById("info").innerText =
+      "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
+
+  aiBtn.style.display = "block";
 });
 
 aiBtn.addEventListener("click", async function() {
-    document.getElementById("result").innerText = "AI が戦略を計算中です…";
+  document.getElementById("result").innerText = "AI が戦略を計算中です…";
 
-    const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
-    if (!res.ok) {
-      const text = await res.text();
-      document.getElementById("result").innerText = "サーバーエラー: " + text;
-      return;
-    }
+  const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
+  const data = await res.json();
 
-    const data = await res.json();
+  let text = "";
+  text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
+  text += "🧠 戦略:\\n" + data.strategy;
 
-    if (!data.slope_analysis || !data.strategy) {
-      document.getElementById("result").innerText = "レスポンス形式が不正です";
-      return;
-    }
+  document.getElementById("result").innerText = text;
 
-    let text = "";
-    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
-    text += "🧠 戦略:\\n" + data.strategy;
+  redraw();
+});
 
-    document.getElementById("result").innerText = text;
-
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
+toggle3d.addEventListener("click", function(){
+  if(iframe.style.display === "none"){
+    iframe.style.display = "block";
+    toggle3d.innerText = "3D 表示を閉じる";
+  } else {
+    iframe.style.display = "none";
+    toggle3d.innerText = "3D 表示を開く";
+  }
 });
 </script>
 
