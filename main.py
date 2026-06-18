@@ -412,14 +412,18 @@ def green_ui():
     border:none;
   }
 
-  iframe{
-      width:100%;
-      max-width:420px;
-      height:70vh;   /* ← 画面の70%の高さにする */
-      border-radius:8px;
-      border:1px solid #555;
-      display:none;
-      margin-top:8px;
+  /* 親ページ側：iframe を画面比で大きくする */
+  iframe {
+  width: 100%;
+  /* max-width を削除または十分大きくする */
+  max-width: none;
+  /* 高さは画面の70%をデフォルトに */
+  height: 70vh;
+  border-radius: 8px;
+  border: 1px solid #555;
+  display: none;
+  margin-top: 8px;
+  box-sizing: border-box;
   }
   
 </style>
@@ -557,10 +561,14 @@ toggle3d.addEventListener("click", function(){
   const currentDisplay = window.getComputedStyle(iframe).display;
 
   if (currentDisplay === "none") {
+    // 表示する
     iframe.style.display = "block";
 
-    // スマホ縦画面でも大きく表示
-    iframe.style.height = Math.max(window.innerHeight * 0.75, 300) + "px";
+    // 親ページ側で高さを確実に確保（スマホ縦画面向け）
+    iframe.style.height = Math.max(window.innerHeight * 0.75, 320) + "px";
+
+    // 幅も念のため確保（親の制約がある場合に上書き）
+    iframe.style.width = "100%";
 
     toggle3d.innerText = "3D 表示を閉じる";
   } else {
@@ -637,24 +645,26 @@ async function main() {{
   camera.position.set(0, -120, 200);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+  // renderer の生成
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  // 初回サイズはドキュメントのクライアントサイズを使う
+  function getClientWidth() { return document.documentElement.clientWidth || window.innerWidth; }
+  function getClientHeight() { return document.documentElement.clientHeight || window.innerHeight; }
+
+  renderer.setSize(getClientWidth(), getClientHeight());
   document.body.appendChild(renderer.domElement);
 
-  scene.add(new THREE.DirectionalLight(0xffffff, 1.0));
-  scene.add(new THREE.AmbientLight(0x888888));
+  // リサイズ対応（iframe のサイズ変更に追従）
+  window.addEventListener('resize', () => {
+  const w = getClientWidth();
+  const h = getClientHeight();
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  });
 
-  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-  const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08;
-
-  for (let i = 0; i < verts.count; i++) {{
-    const x = i % W;
-    const y = Math.floor(i / W);
-    const h = (heights[y] && heights[y][x] !== undefined) ? heights[y][x] * HEIGHT_SCALE : 0;
-    verts.setZ(i, h);
-  }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
