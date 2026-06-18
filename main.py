@@ -579,34 +579,62 @@ toggle3d.addEventListener("click", function(){
 # 3D 表示（汎用：1〜18）
 # ============================================================
 @app.get("/green/{green_id}/3d", response_class=HTMLResponse)
-def green_3d(flat_green_id: int):
+def green_3d(green_id: int):
     return f"""
 <!DOCTYPE html>
 <html lang="ja">
-<head><meta charset="UTF-8"><title>Green {flat_green_id} - 3D View (Flat)</title>
-<style>body{{margin:0;background:#222;color:#fff}}canvas{{display:block}}</style>
+<head>
+<meta charset="UTF-8">
+<title>Green {green_id} - 3D View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
+  canvas {{ display: block; }}
+  .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
+</style>
 </head>
 <body>
+
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+
 <script>
+console.log("3D page loaded for green {green_id}");
+
 async function loadGreenData() {{
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{flat_green_id}.json";
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return await res.json();
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
+  try {{
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const j = await res.json();
+    return j;
+  }} catch (e) {{
+    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    console.error("Failed to load JSON:", e);
+    throw e;
+  }}
 }}
 
 async function main() {{
-  const data = await loadGreenData();
+  let data;
+  try {{
+    data = await loadGreenData();
+  }} catch (e) {{
+    return;
+  }}
+
   const heights = data.heights;
   const W = data.grid_width || 36;
   const H = data.grid_height || 36;
 
-  const scene = new THREE.Scene();
+  if (!Array.isArray(heights) || heights.length === 0) {{
+    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
+    console.error("Invalid heights:", heights);
+    return;
+  }}
 
-  // カメラ：遠くから真上寄りに見る（パースは残すが平面的に見える）
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-  camera.position.set(0, -120, 200); // Y を下げて Z を上げる（遠景・俯瞰）
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, -120, 200);
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
@@ -614,15 +642,12 @@ async function main() {{
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1.0);
-  light.position.set(50, -50, 100);
-  scene.add(light);
+  scene.add(new THREE.DirectionalLight(0xffffff, 1.0));
   scene.add(new THREE.AmbientLight(0x888888));
 
-  // ジオメトリ（高さスケールを小さくして平坦化）
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
   const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08; // ← ここを小さくするほど平面的になる
+  const HEIGHT_SCALE = 0.08;
 
   for (let i = 0; i < verts.count; i++) {{
     const x = i % W;
@@ -633,14 +658,11 @@ async function main() {{
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  // マテリアル：フラット寄りにして色を見やすく
-  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, flatShading: false }});
+  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55 }});
   const mesh = new THREE.Mesh(geometry, material);
-  // 平面的に見せるため回転は最小限（ここでは X 回転を小さく）
-  mesh.rotation.x = -Math.PI / 2; // 平面を上向きに
+  mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // オプション：ワイヤーフレームや輪郭を薄く重ねると平面感が出る
   const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({{ color:0x003300, wireframe:true, opacity:0.25, transparent:true }}));
   wire.rotation.x = -Math.PI / 2;
   scene.add(wire);
@@ -659,11 +681,11 @@ async function main() {{
 }}
 
 main().catch(e => {{
-  document.body.innerHTML = "<div style='color:white;padding:20px'>3D エラー: " + e + "</div>";
+  document.body.innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
   console.error(e);
 }});
 </script>
+
 </body>
 </html>
 """
-
