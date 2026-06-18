@@ -618,6 +618,8 @@ async function main() {
   const w = document.documentElement.clientWidth;
   const h = document.documentElement.clientHeight;
   const aspect = w / h;
+
+  // ★ 平面寄りで見やすいスケール
   const viewSize = 22;
 
   const left = -viewSize * aspect / 2;
@@ -625,10 +627,11 @@ async function main() {
   const top = viewSize / 2;
   const bottom = -viewSize / 2;
 
+  // ★ OrthographicCamera（遠近歪みなし）
   const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
 
-  // ★ 立体感が出る角度
-  camera.position.set(0, -40, 80);
+  // ★ 自然な立体感が出る角度
+  camera.position.set(0, -55, 75);
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -638,17 +641,17 @@ async function main() {
 
   const scene = new THREE.Scene();
 
-  // ★ 立体感が出るライト
-  const light = new THREE.DirectionalLight(0xffffff, 1.2);
-  light.position.set(50, -50, 80);
+  // ★ ライトを自然な強さに調整
+  const light = new THREE.DirectionalLight(0xffffff, 0.9);
+  light.position.set(40, -40, 70);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0x666666));
 
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
   const verts = geometry.attributes.position;
 
-  // ★ 高さを強調（線にならず、立体感が出る）
-  const HEIGHT_SCALE = 0.28;
+  // ★ 自然な立体感（誇張しすぎない）
+  const HEIGHT_SCALE = 0.18;
 
   for (let i = 0; i < verts.count; i++) {
     const x = i % W;
@@ -668,6 +671,7 @@ async function main() {
   mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
+  // ★ ワイヤーフレームで地形が読みやすい
   const wire = new THREE.Mesh(
     geometry.clone(),
     new THREE.MeshBasicMaterial({
@@ -686,6 +690,7 @@ async function main() {
   }
   animate();
 
+  // ★ リサイズ対応
   window.addEventListener('resize', () => {
     const w2 = document.documentElement.clientWidth;
     const h2 = document.documentElement.clientHeight;
