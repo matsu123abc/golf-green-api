@@ -611,7 +611,8 @@ async function loadGreenData() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } catch (e) {
-    document.getElementById('root').innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    document.getElementById('root').innerHTML =
+      "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
     console.error("Failed to load JSON:", e);
     throw e;
   }
@@ -630,43 +631,63 @@ async function main() {
   const H = data.grid_height || 36;
 
   if (!Array.isArray(heights) || heights.length === 0) {
-    document.getElementById('root').innerHTML = "<div class='error'>heights が空または不正です</div>";
+    document.getElementById('root').innerHTML =
+      "<div class='error'>heights が空または不正です</div>";
     console.error("Invalid heights:", heights);
     return;
   }
 
-  // シーン
-  const scene = new THREE.Scene();
-
-  // OrthographicCamera を使って遠近感を無くす（平面的に見える）
+  // ============================
+  //  Orthographic Camera（平面）
+  // ============================
   const w = document.documentElement.clientWidth;
   const h = document.documentElement.clientHeight;
   const aspect = w / h;
-  const viewSize = 40; // 表示スケール（調整可）
+  const viewSize = 20;  // 平面寄りの最適値
+
   const left = -viewSize * aspect / 2;
   const right = viewSize * aspect / 2;
   const top = viewSize / 2;
   const bottom = -viewSize / 2;
-  const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
-  camera.position.set(0, 0, 100); // 上から見るイメージ
+
+  const camera = new THREE.OrthographicCamera(
+    left, right, top, bottom, -1000, 1000
+  );
+  camera.position.set(0, 0, 100);
   camera.lookAt(0, 0, 0);
 
-  // レンダラ
+  // ============================
+  // Renderer
+  // ============================
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(w, h);
   document.getElementById('root').appendChild(renderer.domElement);
 
-  // ライトは不要（MeshBasicMaterial を使うため）
-  // geometry
+  // ============================
+  // Scene & Light
+  // ============================
+  const scene = new THREE.Scene();
+
+  const light = new THREE.DirectionalLight(0xffffff, 0.8);
+  light.position.set(30, -30, 50);
+  scene.add(light);
+
+  scene.add(new THREE.AmbientLight(0x666666));
+
+  // ============================
+  // Geometry
+  // ============================
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
   const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08; // 平面寄り。小さくするとより平坦に見える
+
+  const HEIGHT_SCALE = 0.12;  // ← 平面寄りで線にならない最適値
 
   for (let i = 0; i < verts.count; i++) {
     const x = i % W;
     const y = Math.floor(i / W);
     let hval = 0;
+
     if (heights[y] && heights[y][x] !== undefined) {
       hval = heights[y][x] * HEIGHT_SCALE;
     }
@@ -675,47 +696,61 @@ async function main() {
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  // 平面的に見せるためにライト不要の Basic マテリアルを使用
-  const material = new THREE.MeshBasicMaterial({ color: 0x55aa55 });
+  // ============================
+  // Material（Lambert：陰影あり）
+  // ============================
+  const material = new THREE.MeshLambertMaterial({
+    color: 0x55aa55,
+    side: THREE.DoubleSide
+  });
+
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // ワイヤーフレームを薄く重ねると地形が読みやすい
-  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({ color:0x003300, wireframe:true, opacity:0.25, transparent:true }));
+  // ワイヤーフレーム（地形が読みやすい）
+  const wire = new THREE.Mesh(
+    geometry.clone(),
+    new THREE.MeshBasicMaterial({
+      color: 0x003300,
+      wireframe: true,
+      opacity: 0.25,
+      transparent: true
+    })
+  );
   wire.rotation.x = -Math.PI / 2;
   scene.add(wire);
 
-  // 描画ループ
+  // ============================
+  // Animation
+  // ============================
   function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }
   animate();
 
-  // リサイズ対応
-  let resizeTimeout = null;
+  // ============================
+  // Resize
+  // ============================
   window.addEventListener('resize', () => {
-    if (resizeTimeout) clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {
-      const w2 = document.documentElement.clientWidth;
-      const h2 = document.documentElement.clientHeight;
-      const aspect2 = w2 / h2;
-      const left2 = -viewSize * aspect2 / 2;
-      const right2 = viewSize * aspect2 / 2;
-      camera.left = left2;
-      camera.right = right2;
-      camera.top = viewSize / 2;
-      camera.bottom = -viewSize / 2;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w2, h2);
-      renderer.render(scene, camera);
-    }, 120);
+    const w2 = document.documentElement.clientWidth;
+    const h2 = document.documentElement.clientHeight;
+    const aspect2 = w2 / h2;
+
+    camera.left = -viewSize * aspect2 / 2;
+    camera.right = viewSize * aspect2 / 2;
+    camera.top = viewSize / 2;
+    camera.bottom = -viewSize / 2;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(w2, h2);
   });
 }
 
 main().catch(e => {
-  document.getElementById('root').innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
+  document.getElementById('root').innerHTML =
+    "<div class='error'>3D エラー: " + e + "</div>";
   console.error(e);
 });
 </script>
@@ -724,4 +759,3 @@ main().catch(e => {
 </html>
 """
     return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
-
