@@ -635,7 +635,7 @@ async function main() {{
   // Three.js 初期化
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, -60, 40);
+  camera.position.set(0, -80, 70);
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
@@ -663,7 +663,7 @@ async function main() {{
       continue;
     }}
 
-    const h = heights[y][x] * 0.3;
+    const h = heights[y][x] * 0.12;
     verts.setZ(i, h);
   }}
   verts.needsUpdate = true;
