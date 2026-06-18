@@ -413,14 +413,15 @@ def green_ui():
   }
 
   iframe{
-    width:100%;
-    max-width:420px;
-    height:260px;
-    border-radius:8px;
-    border:1px solid #555;
-    display:none;
-    margin-top:8px;
+      width:100%;
+      max-width:420px;
+      height:70vh;   /* ← 画面の70%の高さにする */
+      border-radius:8px;
+      border:1px solid #555;
+      display:none;
+      margin-top:8px;
   }
+  
 </style>
 </head>
 
