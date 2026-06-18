@@ -308,150 +308,179 @@ def set_pin(green_id: int, pos: dict):
 # ============================================================
 # 起動画面：統合 UI（18ホール対応）
 # ============================================================
-from fastapi.responses import HTMLResponse
-
-@app.get("/green/{green_id}/3d", response_class=HTMLResponse)
-def green_3d(green_id: int):
-    html = """
+@app.get("/", response_class=HTMLResponse)
+def green_ui():
+    return """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Green {GREEN_ID} - 3D View</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Green - ピン登録 & AI戦略</title>
 <style>
-  html,body{height:100%;margin:0;background:#222;color:#fff}
-  #root{width:100%;height:100%;overflow:hidden}
-  canvas{display:block;width:100%;height:100%}
-  .error{padding:20px;color:#fff;background:#600;font-family:system-ui}
+  body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
+  #canvas { touch-action: manipulation; border:1px solid #555; }
+  button {
+    font-size:22px; padding:12px 24px; margin-top:10px;
+    background:#4CAF50; border:none; color:white; border-radius:6px;
+    width:90%;
+  }
+  #result {
+    margin-top:20px; padding:15px; background:#333; border-radius:8px;
+    white-space:pre-wrap; text-align:left;
+  }
+  iframe {
+    width:100%;
+    height:400px;
+    border:1px solid #555;
+    border-radius:8px;
+    margin-top:20px;
+  }
 </style>
 </head>
 <body>
-<div id="root"></div>
 
-<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+<h2>Green - ピン登録 & AI戦略</h2>
+
+<div style="margin: 10px;">
+  <label for="holeSelect">ホール選択：</label>
+  <select id="holeSelect" style="font-size:20px; padding:4px;">
+    <option value="1">Hole 1</option>
+    <option value="2">Hole 2</option>
+    <option value="3">Hole 3</option>
+    <option value="4">Hole 4</option>
+    <option value="5">Hole 5</option>
+    <option value="6">Hole 6</option>
+    <option value="7">Hole 7</option>
+    <option value="8">Hole 8</option>
+    <option value="9">Hole 9</option>
+    <option value="10">Hole 10</option>
+    <option value="11">Hole 11</option>
+    <option value="12">Hole 12</option>
+    <option value="13">Hole 13</option>
+    <option value="14">Hole 14</option>
+    <option value="15">Hole 15</option>
+    <option value="16">Hole 16</option>
+    <option value="17">Hole 17</option>
+    <option value="18">Hole 18</option>
+  </select>
+</div>
+
+<canvas id="canvas" width="360" height="360"></canvas>
+
+<p id="info">ピン位置をタップしてください</p>
+
+<button id="saveBtn" style="display:none;">この位置を登録する</button>
+<button id="aiBtn" style="display:none; background:#2196F3;">AI に戦略を聞く</button>
+
+<div id="result"></div>
+
+<h3 style="margin-top:30px;">3D グリーン（参考表示）</h3>
+<iframe id="view3d" src="/green/1/3d"></iframe>
 
 <script>
-console.log("3D page loaded for green {GREEN_ID}");
+let selectedX = null;
+let selectedY = null;
+let currentHole = 1;
 
-async function loadGreenData() {
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  } catch (e) {
-    document.getElementById('root').innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
-    console.error("Failed to load JSON:", e);
-    throw e;
-  }
-}
+let greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
 
-async function main() {
-  let data;
-  try {
-    data = await loadGreenData();
-  } catch (e) {
-    return;
-  }
+const holeSelect = document.getElementById("holeSelect");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const saveBtn = document.getElementById("saveBtn");
+const aiBtn = document.getElementById("aiBtn");
+const iframe = document.getElementById("view3d");
 
-  const heights = data.heights;
-  const W = data.grid_width || 36;
-  const H = data.grid_height || 36;
+const img = new Image();
+img.src = greenImageUrl;
+img.onload = () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+};
 
-  if (!Array.isArray(heights) || heights.length === 0) {
-    document.getElementById('root').innerHTML = "<div class='error'>heights が空または不正です</div>";
-    console.error("Invalid heights:", heights);
-    return;
-  }
+holeSelect.addEventListener("change", function() {
+    currentHole = parseInt(this.value);
 
-  // シーンとカメラ
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, document.documentElement.clientWidth / document.documentElement.clientHeight, 0.1, 2000);
-  camera.position.set(0, -120, 200);
-  camera.lookAt(0, 0, 0);
+    greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
+    img.src = greenImageUrl;
 
-  // レンダラ
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
+    iframe.src = "/green/" + currentHole + "/3d";
 
-  function getClientWidth() { return document.documentElement.clientWidth || window.innerWidth; }
-  function getClientHeight() { return document.documentElement.clientHeight || window.innerHeight; }
+    selectedX = null;
+    selectedY = null;
+    saveBtn.style.display = "none";
+    aiBtn.style.display = "none";
+    document.getElementById("info").innerText = "ピン位置をタップしてください";
+    document.getElementById("result").innerText = "";
 
-  renderer.setSize(getClientWidth(), getClientHeight());
-  document.getElementById('root').appendChild(renderer.domElement);
+    img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+});
 
-  // ライト
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(30, -30, 50);
-  scene.add(light);
-  scene.add(new THREE.AmbientLight(0x888888));
+canvas.addEventListener("click", function(e) {
+    const rect = canvas.getBoundingClientRect();
+    selectedX = Math.floor((e.clientX - rect.left) / 10);
+    selectedY = Math.floor((e.clientY - rect.top) / 10);
 
-  // ジオメトリ生成
-  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-  const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
 
-  for (let i = 0; i < verts.count; i++) {
-    const x = i % W;
-    const y = Math.floor(i / W);
-    let h = 0;
-    if (heights[y] && heights[y][x] !== undefined) {
-      h = heights[y][x] * HEIGHT_SCALE;
-    } else {
-      console.warn("heights missing at", x, y);
+    document.getElementById("info").innerText =
+        `選択中のピン位置: (${selectedX}, ${selectedY})`;
+
+    saveBtn.style.display = "block";
+});
+
+saveBtn.addEventListener("click", async function() {
+    await fetch("/set_pin/" + currentHole, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: selectedX, y: selectedY })
+    });
+
+    document.getElementById("info").innerText =
+        "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
+    
+    aiBtn.style.display = "block";
+});
+
+aiBtn.addEventListener("click", async function() {
+    document.getElementById("result").innerText = "AI が戦略を計算中です…";
+
+    const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
+    if (!res.ok) {
+      const text = await res.text();
+      document.getElementById("result").innerText = "サーバーエラー: " + text;
+      return;
     }
-    verts.setZ(i, h);
-  }
-  verts.needsUpdate = true;
-  geometry.computeVertexNormals();
 
-  // マテリアルとメッシュ
-  const material = new THREE.MeshLambertMaterial({ color: 0x55aa55 });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
-  scene.add(mesh);
+    const data = await res.json();
 
-  // ワイヤーフレーム（等高線風）
-  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({ color:0x003300, wireframe:true, opacity:0.25, transparent:true }));
-  wire.rotation.x = -Math.PI / 2;
-  scene.add(wire);
+    if (!data.slope_analysis || !data.strategy) {
+      document.getElementById("result").innerText = "レスポンス形式が不正です";
+      return;
+    }
 
-  // アニメーションループ
-  function animate() {
-    requestAnimationFrame(animate);
-    renderer.render(scene, camera);
-  }
-  animate();
+    let text = "";
+    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
+    text += "🧠 戦略:\\n" + data.strategy;
 
-  // リサイズ対応
-  let resizeTimeout = null;
-  window.addEventListener('resize', () => {
-    if (resizeTimeout) clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {
-      const w = getClientWidth();
-      const h = getClientHeight();
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-      renderer.render(scene, camera);
-    }, 120);
-  });
-}
+    document.getElementById("result").innerText = text;
 
-main().catch(e => {
-  document.getElementById('root').innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
-  console.error(e);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
 });
 </script>
 
 </body>
 </html>
 """
-    # プレースホルダを置換して返す（f-string の波括弧問題を回避）
-    return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
-
-
 
 # ============================================================
 # 3D 表示（汎用：1〜18）
@@ -464,132 +493,74 @@ def green_3d(green_id: int):
 <head>
 <meta charset="UTF-8">
 <title>Green {green_id} - 3D View</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
-  canvas {{ display: block; width:100%; height:100%; }}
-  .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
+  body {{ margin: 0; overflow: hidden; background: #222; }}
+  canvas {{ display: block; }}
 </style>
 </head>
 <body>
 
-<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 
 <script>
-console.log("3D page loaded for green {green_id}");
-
 async function loadGreenData() {{
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
-  try {{
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
-  }} catch (e) {{
-    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
-    console.error("Failed to load JSON:", e);
-    throw e;
-  }}
+  const res = await fetch(url);
+  return await res.json();
 }}
 
 async function main() {{
-  let data;
-  try {{
-    data = await loadGreenData();
-  }} catch (e) {{
-    return;
-  }}
-
+  const data = await loadGreenData();
   const heights = data.heights;
-  const W = data.grid_width || 36;
-  const H = data.grid_height || 36;
+  const W = data.grid_width;
+  const H = data.grid_height;
 
-  if (!Array.isArray(heights) || heights.length === 0) {{
-    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
-    console.error("Invalid heights:", heights);
-    return;
-  }}
-
-  // シーンとカメラ（カメラはやや俯瞰）
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, (document.documentElement.clientWidth || window.innerWidth) / (document.documentElement.clientHeight || window.innerHeight), 0.1, 2000);
-  camera.position.set(0, -120, 200);
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, -60, 40);
   camera.lookAt(0, 0, 0);
 
-  // レンダラ（iframe の実サイズに合わせる）
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-
-  function getClientWidth() {{ return document.documentElement.clientWidth || window.innerWidth; }}
-  function getClientHeight() {{ return document.documentElement.clientHeight || window.innerHeight; }}
-
-  renderer.setSize(getClientWidth(), getClientHeight());
+  renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // ライト
   const light = new THREE.DirectionalLight(0xffffff, 1);
   light.position.set(30, -30, 50);
   scene.add(light);
-  scene.add(new THREE.AmbientLight(0x888888));
 
-  // ジオメトリ生成（必須）
+  const ambient = new THREE.AmbientLight(0x888888);
+  scene.add(ambient);
+
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-  const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08; // 必要に応じて小さくして平面的に
 
+  const verts = geometry.attributes.position;
   for (let i = 0; i < verts.count; i++) {{
     const x = i % W;
     const y = Math.floor(i / W);
-    let h = 0;
-    if (heights[y] && heights[y][x] !== undefined) {{
-      h = heights[y][x] * HEIGHT_SCALE;
-    }} else {{
-      console.warn("heights missing at", x, y);
-    }}
+    const h = heights[y][x] * 0.3;
     verts.setZ(i, h);
   }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  // マテリアルとメッシュ
-  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55 }});
+  const material = new THREE.MeshLambertMaterial({{
+    color: 0x55aa55,
+    side: THREE.DoubleSide
+  }});
+
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // ワイヤーフレーム（等高線風）
-  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({{ color:0x003300, wireframe:true, opacity:0.25, transparent:true }}));
-  wire.rotation.x = -Math.PI / 2;
-  scene.add(wire);
-
-  // アニメーションループ
   function animate() {{
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }}
   animate();
-
-  // リサイズ対応（iframe のサイズ変更に追従）
-  let resizeTimeout = null;
-  window.addEventListener('resize', () => {{
-    if (resizeTimeout) clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {{
-      const w = getClientWidth();
-      const h = getClientHeight();
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-      renderer.render(scene, camera);
-    }}, 120);
-  }});
 }}
 
-main().catch(e => {{
-  document.body.innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
-  console.error(e);
-}});
+main();
 </script>
 
 </body>
 </html>
 """
-
