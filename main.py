@@ -554,17 +554,16 @@ aiBtn.addEventListener("click", async function() {
 });
 
 toggle3d.addEventListener("click", function(){
-  // computed style を使って現在の表示状態を取得する（CSS 由来の display を正しく判定）
   const currentDisplay = window.getComputedStyle(iframe).display;
 
   if (currentDisplay === "none") {
-    // 表示する
     iframe.style.display = "block";
-    // iframe の高さを確保（スマホ縦画面で見切れないように）
-    iframe.style.height = Math.max(window.innerHeight * 0.45, 240) + "px";
+
+    // スマホ縦画面でも大きく表示
+    iframe.style.height = Math.max(window.innerHeight * 0.75, 300) + "px";
+
     toggle3d.innerText = "3D 表示を閉じる";
   } else {
-    // 非表示にする
     iframe.style.display = "none";
     toggle3d.innerText = "3D 表示を開く";
   }
