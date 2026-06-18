@@ -308,291 +308,150 @@ def set_pin(green_id: int, pos: dict):
 # ============================================================
 # 起動画面：統合 UI（18ホール対応）
 # ============================================================
-@app.get("/", response_class=HTMLResponse)
-def green_ui():
-    return """
+from fastapi.responses import HTMLResponse
+
+@app.get("/green/{green_id}/3d", response_class=HTMLResponse)
+def green_3d(green_id: int):
+    html = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Green - ピン登録 & AI戦略</title>
-
+<title>Green {GREEN_ID} - 3D View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root{
-    --bg:#111;
-    --panel:#1b1b1b;
-    --accent:#2196F3;
-    --ok:#4CAF50;
-    --text:#fff;
-    --touch:56px;
-  }
-
-  html,body{height:100%;margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;box-sizing:border-box}
-  .container{padding:8px;box-sizing:border-box}
-
-  .header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    margin-bottom:10px;
-  }
-
-  .title{
-    font-size:18px;
-    margin:0;
-  }
-
-  .map-wrap{
-    width:100%;
-    max-width:100%;
-    padding:0;
-    margin:0 auto;
-    display:flex;
-    justify-content:center;
-  }
-
-  /* canvas は親幅に追従 */
-  canvas#canvas{
-    width:100%;
-    max-width:none;
-    height:auto;
-    border:1px solid #555;
-    border-radius:8px;
-    background:#000;
-    touch-action:manipulation;
-    box-sizing:border-box;
-  }
-
-  #result{
-    margin-top:10px;
-    padding:12px;
-    background:var(--panel);
-    border-radius:8px;
-    font-size:14px;
-    white-space:pre-wrap;
-    text-align:left;
-    max-height:28vh;
-    overflow:auto;
-  }
-
-  .action-bar{
-    position:fixed;
-    left:0;
-    right:0;
-    bottom:env(safe-area-inset-bottom, 0);
-    display:flex;
-    gap:8px;
-    padding:8px;
-    background:rgba(0,0,0,0.6);
-    justify-content:center;
-    z-index:9999;
-  }
-
-  .btn{
-    height:var(--touch);
-    min-width:44%;
-    border-radius:10px;
-    font-size:18px;
-    border:none;
-    color:var(--text);
-  }
-
-  .btn-save{ background:var(--ok); }
-  .btn-ai{ background:var(--accent); }
-
-  #toggle3d{
-    margin-top:10px;
-    width:100%;
-    max-width:none;
-    background:#333;
-    color:#fff;
-    border-radius:8px;
-    padding:10px;
-    border:none;
-  }
-
-  /* 親ページ側：iframe は初期非表示、高さは開くときに JS で設定 */
-  iframe {
-    width: 100%;
-    max-width: none;
-    height: 0;
-    border-radius: 8px;
-    border: 1px solid #555;
-    display: none;
-    margin-top: 8px;
-    box-sizing: border-box;
-  }
+  html,body{height:100%;margin:0;background:#222;color:#fff}
+  #root{width:100%;height:100%;overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
+  .error{padding:20px;color:#fff;background:#600;font-family:system-ui}
 </style>
 </head>
-
 <body>
-<div class="container">
-  <div class="header">
-    <h2 class="title">Green - ピン登録 & AI戦略</h2>
-    <select id="holeSelect" style="font-size:16px; padding:6px;">
-      <option value="1">Hole 1</option>
-      <option value="2">Hole 2</option>
-      <option value="3">Hole 3</option>
-      <option value="4">Hole 4</option>
-      <option value="5">Hole 5</option>
-      <option value="6">Hole 6</option>
-      <option value="7">Hole 7</option>
-      <option value="8">Hole 8</option>
-      <option value="9">Hole 9</option>
-      <option value="10">Hole 10</option>
-      <option value="11">Hole 11</option>
-      <option value="12">Hole 12</option>
-      <option value="13">Hole 13</option>
-      <option value="14">Hole 14</option>
-      <option value="15">Hole 15</option>
-      <option value="16">Hole 16</option>
-      <option value="17">Hole 17</option>
-      <option value="18">Hole 18</option>
-    </select>
-  </div>
+<div id="root"></div>
 
-  <div class="map-wrap">
-    <canvas id="canvas" width="360" height="360"></canvas>
-  </div>
-
-  <p id="info" style="font-size:14px;">ピン位置をタップしてください</p>
-
-  <div id="result"></div>
-
-  <button id="toggle3d">3D 表示を開く</button>
-  <!-- data-loaded 属性で遅延ロード制御 -->
-  <iframe id="view3d" data-loaded="false"></iframe>
-
-  <div class="action-bar">
-    <button id="saveBtn" class="btn btn-save" style="display:none;">登録</button>
-    <button id="aiBtn" class="btn btn-ai" style="display:none;">AI戦略</button>
-  </div>
-</div>
+<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
-let selectedX = null;
-let selectedY = null;
-let currentHole = 1;
+console.log("3D page loaded for green {GREEN_ID}");
 
-let greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_1.png";
-
-const holeSelect = document.getElementById("holeSelect");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const saveBtn = document.getElementById("saveBtn");
-const aiBtn = document.getElementById("aiBtn");
-const iframe = document.getElementById("view3d");
-const toggle3d = document.getElementById("toggle3d");
-
-const img = new Image();
-img.crossOrigin = "anonymous";
-img.src = greenImageUrl;
-img.onload = () => redraw();
-
-function redraw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  if(selectedX !== null){
-    ctx.beginPath();
-    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "red";
-    ctx.fill();
+async function loadGreenData() {
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch (e) {
+    document.getElementById('root').innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    console.error("Failed to load JSON:", e);
+    throw e;
   }
 }
 
-holeSelect.addEventListener("change", function() {
-  currentHole = parseInt(this.value);
-  greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
-  img.src = greenImageUrl;
-
-  // 遅延ロードを使う場合は data-loaded を false にしておく
-  iframe.removeAttribute("src");
-  iframe.setAttribute("data-loaded", "false");
-
-  selectedX = null;
-  selectedY = null;
-  saveBtn.style.display = "none";
-  aiBtn.style.display = "none";
-  document.getElementById("info").innerText = "ピン位置をタップしてください";
-  document.getElementById("result").innerText = "";
-});
-
-canvas.addEventListener("click", function(e) {
-  const rect = canvas.getBoundingClientRect();
-  selectedX = Math.floor((e.clientX - rect.left) / 10);
-  selectedY = Math.floor((e.clientY - rect.top) / 10);
-
-  redraw();
-
-  document.getElementById("info").innerText =
-      `選択中のピン位置: (${selectedX}, ${selectedY})`;
-
-  saveBtn.style.display = "block";
-});
-
-saveBtn.addEventListener("click", async function() {
-  await fetch("/set_pin/" + currentHole, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x: selectedX, y: selectedY })
-  });
-
-  document.getElementById("info").innerText =
-      "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
-
-  aiBtn.style.display = "block";
-});
-
-aiBtn.addEventListener("click", async function() {
-  document.getElementById("result").innerText = "AI が戦略を計算中です…";
-
-  const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
-  const data = await res.json();
-
-  let text = "";
-  text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
-  text += "🧠 戦略:\\n" + data.strategy;
-
-  document.getElementById("result").innerText = text;
-
-  redraw();
-});
-
-toggle3d.addEventListener("click", function(){
-  const currentDisplay = window.getComputedStyle(iframe).display;
-
-  if (currentDisplay === "none") {
-    // 表示する
-    iframe.style.display = "block";
-
-    // 幅と高さを明示的に上書き（スマホ縦画面で見切れないように）
-    iframe.style.width = "100%";
-    iframe.style.height = Math.max(window.innerHeight * 0.75, 360) + "px";
-
-    // 遅延ロード: 未ロードなら src を設定して読み込む
-    if (iframe.getAttribute("data-loaded") !== "true") {
-      iframe.src = "/green/" + currentHole + "/3d";
-      iframe.setAttribute("data-loaded", "true");
-    }
-
-    toggle3d.innerText = "3D 表示を閉じる";
-
-    // 親ページの resize をトリガして iframe 内の描画が追従するようにする
-    setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch(e) {} }, 200);
-
-  } else {
-    // 非表示にする
-    iframe.style.display = "none";
-    iframe.style.height = "0";
-    toggle3d.innerText = "3D 表示を開く";
+async function main() {
+  let data;
+  try {
+    data = await loadGreenData();
+  } catch (e) {
+    return;
   }
+
+  const heights = data.heights;
+  const W = data.grid_width || 36;
+  const H = data.grid_height || 36;
+
+  if (!Array.isArray(heights) || heights.length === 0) {
+    document.getElementById('root').innerHTML = "<div class='error'>heights が空または不正です</div>";
+    console.error("Invalid heights:", heights);
+    return;
+  }
+
+  // シーンとカメラ
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, document.documentElement.clientWidth / document.documentElement.clientHeight, 0.1, 2000);
+  camera.position.set(0, -120, 200);
+  camera.lookAt(0, 0, 0);
+
+  // レンダラ
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+
+  function getClientWidth() { return document.documentElement.clientWidth || window.innerWidth; }
+  function getClientHeight() { return document.documentElement.clientHeight || window.innerHeight; }
+
+  renderer.setSize(getClientWidth(), getClientHeight());
+  document.getElementById('root').appendChild(renderer.domElement);
+
+  // ライト
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(30, -30, 50);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0x888888));
+
+  // ジオメトリ生成
+  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+  const verts = geometry.attributes.position;
+  const HEIGHT_SCALE = 0.08;
+
+  for (let i = 0; i < verts.count; i++) {
+    const x = i % W;
+    const y = Math.floor(i / W);
+    let h = 0;
+    if (heights[y] && heights[y][x] !== undefined) {
+      h = heights[y][x] * HEIGHT_SCALE;
+    } else {
+      console.warn("heights missing at", x, y);
+    }
+    verts.setZ(i, h);
+  }
+  verts.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  // マテリアルとメッシュ
+  const material = new THREE.MeshLambertMaterial({ color: 0x55aa55 });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  scene.add(mesh);
+
+  // ワイヤーフレーム（等高線風）
+  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({ color:0x003300, wireframe:true, opacity:0.25, transparent:true }));
+  wire.rotation.x = -Math.PI / 2;
+  scene.add(wire);
+
+  // アニメーションループ
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // リサイズ対応
+  let resizeTimeout = null;
+  window.addEventListener('resize', () => {
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      const w = getClientWidth();
+      const h = getClientHeight();
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderer.render(scene, camera);
+    }, 120);
+  });
+}
+
+main().catch(e => {
+  document.getElementById('root').innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
+  console.error(e);
 });
 </script>
 
 </body>
 </html>
 """
+    # プレースホルダを置換して返す（f-string の波括弧問題を回避）
+    return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
+
+
 
 # ============================================================
 # 3D 表示（汎用：1〜18）
