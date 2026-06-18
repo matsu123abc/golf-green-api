@@ -602,11 +602,6 @@ def green_3d(green_id: int):
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
-// ★ クエリパラメータからピン座標を取得
-const urlParams = new URLSearchParams(window.location.search);
-const pinX = parseFloat(urlParams.get("x"));
-const pinY = parseFloat(urlParams.get("y"));
-
 async function loadGreenData() {
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
   const res = await fetch(url);
@@ -623,7 +618,6 @@ async function main() {
   const w = document.documentElement.clientWidth;
   const h = document.documentElement.clientHeight;
   const aspect = w / h;
-
   const viewSize = 22;
 
   const left = -viewSize * aspect / 2;
@@ -632,7 +626,9 @@ async function main() {
   const bottom = -viewSize / 2;
 
   const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
-  camera.position.set(0, -55, 75);
+
+  // ★ 立体感が出る角度
+  camera.position.set(0, -40, 80);
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -642,15 +638,17 @@ async function main() {
 
   const scene = new THREE.Scene();
 
-  const light = new THREE.DirectionalLight(0xffffff, 0.9);
-  light.position.set(40, -40, 70);
+  // ★ 立体感が出るライト
+  const light = new THREE.DirectionalLight(0xffffff, 1.2);
+  light.position.set(50, -50, 80);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0x666666));
 
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
   const verts = geometry.attributes.position;
 
-  const HEIGHT_SCALE = 0.18;
+  // ★ 高さを強調（線にならず、立体感が出る）
+  const HEIGHT_SCALE = 0.28;
 
   for (let i = 0; i < verts.count; i++) {
     const x = i % W;
@@ -682,27 +680,6 @@ async function main() {
   wire.rotation.x = -Math.PI / 2;
   scene.add(wire);
 
-  // ★★★ ピン位置を 3D 上に表示（赤い球体） ★★★
-  if (!isNaN(pinX) && !isNaN(pinY)) {
-
-    // 2D グリッド座標 → 3D 座標へ変換
-    const px = (pinX / (W - 1)) * 36 - 18;
-    const py = (pinY / (H - 1)) * 36 - 18;
-
-    // ピン位置の高さ
-    const hval = heights[pinY][pinX] * HEIGHT_SCALE;
-
-    // 赤い球体
-    const sphereGeo = new THREE.SphereGeometry(0.6, 16, 16);
-    const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
-    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-
-    // 位置セット（少し浮かせる）
-    sphere.position.set(px, hval + 0.3, -py);
-
-    scene.add(sphere);
-  }
-
   function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
@@ -731,3 +708,4 @@ main();
 </html>
 """
     return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
+
