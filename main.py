@@ -602,6 +602,11 @@ def green_3d(green_id: int):
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
+// ★ クエリパラメータからピン座標を取得
+const urlParams = new URLSearchParams(window.location.search);
+const pinX = parseFloat(urlParams.get("x"));
+const pinY = parseFloat(urlParams.get("y"));
+
 async function loadGreenData() {
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
   const res = await fetch(url);
@@ -619,7 +624,6 @@ async function main() {
   const h = document.documentElement.clientHeight;
   const aspect = w / h;
 
-  // ★ 平面寄りで見やすいスケール
   const viewSize = 22;
 
   const left = -viewSize * aspect / 2;
@@ -627,10 +631,7 @@ async function main() {
   const top = viewSize / 2;
   const bottom = -viewSize / 2;
 
-  // ★ OrthographicCamera（遠近歪みなし）
   const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
-
-  // ★ 自然な立体感が出る角度
   camera.position.set(0, -55, 75);
   camera.lookAt(0, 0, 0);
 
@@ -641,7 +642,6 @@ async function main() {
 
   const scene = new THREE.Scene();
 
-  // ★ ライトを自然な強さに調整
   const light = new THREE.DirectionalLight(0xffffff, 0.9);
   light.position.set(40, -40, 70);
   scene.add(light);
@@ -650,7 +650,6 @@ async function main() {
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
   const verts = geometry.attributes.position;
 
-  // ★ 自然な立体感（誇張しすぎない）
   const HEIGHT_SCALE = 0.18;
 
   for (let i = 0; i < verts.count; i++) {
@@ -671,7 +670,6 @@ async function main() {
   mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // ★ ワイヤーフレームで地形が読みやすい
   const wire = new THREE.Mesh(
     geometry.clone(),
     new THREE.MeshBasicMaterial({
@@ -684,13 +682,33 @@ async function main() {
   wire.rotation.x = -Math.PI / 2;
   scene.add(wire);
 
+  // ★★★ ピン位置を 3D 上に表示（赤い球体） ★★★
+  if (!isNaN(pinX) && !isNaN(pinY)) {
+
+    // 2D グリッド座標 → 3D 座標へ変換
+    const px = (pinX / (W - 1)) * 36 - 18;
+    const py = (pinY / (H - 1)) * 36 - 18;
+
+    // ピン位置の高さ
+    const hval = heights[pinY][pinX] * HEIGHT_SCALE;
+
+    // 赤い球体
+    const sphereGeo = new THREE.SphereGeometry(0.6, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+
+    // 位置セット（少し浮かせる）
+    sphere.position.set(px, hval + 0.3, -py);
+
+    scene.add(sphere);
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }
   animate();
 
-  // ★ リサイズ対応
   window.addEventListener('resize', () => {
     const w2 = document.documentElement.clientWidth;
     const h2 = document.documentElement.clientHeight;
@@ -713,4 +731,3 @@ main();
 </html>
 """
     return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
-
