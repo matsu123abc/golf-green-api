@@ -597,7 +597,7 @@ def green_3d(green_id: int):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
-  canvas {{ display: block; }}
+  canvas {{ display: block; width:100%; height:100%; }}
   .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
 </style>
 </head>
@@ -606,11 +606,19 @@ def green_3d(green_id: int):
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
+console.log("3D page loaded for green {green_id}");
+
 async function loadGreenData() {{
   const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return await res.json();
+  try {{
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  }} catch (e) {{
+    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    console.error("Failed to load JSON:", e);
+    throw e;
+  }}
 }}
 
 async function main() {{
@@ -618,7 +626,6 @@ async function main() {{
   try {{
     data = await loadGreenData();
   }} catch (e) {{
-    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
     return;
   }}
 
@@ -626,69 +633,90 @@ async function main() {{
   const W = data.grid_width || 36;
   const H = data.grid_height || 36;
 
+  if (!Array.isArray(heights) || heights.length === 0) {{
+    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
+    console.error("Invalid heights:", heights);
+    return;
+  }}
+
+  // シーンとカメラ（カメラはやや俯瞰）
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(
-      45,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      2000
-  );
+  const camera = new THREE.PerspectiveCamera(45, (document.documentElement.clientWidth || window.innerWidth) / (document.documentElement.clientHeight || window.innerHeight), 0.1, 2000);
   camera.position.set(0, -120, 200);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // レンダラ（iframe の実サイズに合わせる）
+  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
   renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  function getClientWidth() {{ return document.documentElement.clientWidth || window.innerWidth; }}
+  function getClientHeight() {{ return document.documentElement.clientHeight || window.innerHeight; }}
+
+  renderer.setSize(getClientWidth(), getClientHeight());
   document.body.appendChild(renderer.domElement);
 
-  // ★★★ ここが欠けていたため動いていなかった ★★★
-  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-  const verts = geometry.attributes.position;
-  const HEIGHT_SCALE = 0.08;
-
-  for (let i = 0; i < verts.count; i++) {{
-    const x = i % W;
-    const y = Math.floor(i / W);
-    const h = heights[y][x] * HEIGHT_SCALE;
-    verts.setZ(i, h);
-  }}
-  verts.needsUpdate = true;
-  geometry.computeVertexNormals();
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-  const material = new THREE.MeshLambertMaterial({ color: 0x55aa55 });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
-  scene.add(mesh);
-
-  const wire = new THREE.Mesh(
-    geometry.clone(),
-    new THREE.MeshBasicMaterial({ color:0x003300, wireframe:true, opacity:0.25, transparent:true })
-  );
-  wire.rotation.x = -Math.PI / 2;
-  scene.add(wire);
-
+  // ライト
   const light = new THREE.DirectionalLight(0xffffff, 1);
   light.position.set(30, -30, 50);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0x888888));
 
+  // ジオメトリ生成（必須）
+  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+  const verts = geometry.attributes.position;
+  const HEIGHT_SCALE = 0.08; // 必要に応じて小さくして平面的に
+
+  for (let i = 0; i < verts.count; i++) {{
+    const x = i % W;
+    const y = Math.floor(i / W);
+    let h = 0;
+    if (heights[y] && heights[y][x] !== undefined) {{
+      h = heights[y][x] * HEIGHT_SCALE;
+    }} else {{
+      console.warn("heights missing at", x, y);
+    }}
+    verts.setZ(i, h);
+  }}
+  verts.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  // マテリアルとメッシュ
+  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55 }});
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  scene.add(mesh);
+
+  // ワイヤーフレーム（等高線風）
+  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({{ color:0x003300, wireframe:true, opacity:0.25, transparent:true }}));
+  wire.rotation.x = -Math.PI / 2;
+  scene.add(wire);
+
+  // アニメーションループ
   function animate() {{
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }}
   animate();
 
+  // リサイズ対応（iframe のサイズ変更に追従）
+  let resizeTimeout = null;
   window.addEventListener('resize', () => {{
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, h);
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {{
+      const w = getClientWidth();
+      const h = getClientHeight();
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderer.render(scene, camera);
+    }}, 120);
   }});
 }}
 
-main();
+main().catch(e => {{
+  document.body.innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
+  console.error(e);
+}});
 </script>
 
 </body>
