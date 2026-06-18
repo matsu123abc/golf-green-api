@@ -578,123 +578,150 @@ toggle3d.addEventListener("click", function(){
 # ============================================================
 # 3D 表示（汎用：1〜18）
 # ============================================================
+from fastapi.responses import HTMLResponse
+
 @app.get("/green/{green_id}/3d", response_class=HTMLResponse)
 def green_3d(green_id: int):
-    return f"""
+    html = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Green {green_id} - 3D View</title>
+<title>Green {GREEN_ID} - 3D View</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
-  canvas {{ display: block; }}
-  .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
+  html,body{height:100%;margin:0;background:#222;color:#fff}
+  #root{width:100%;height:100%;overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
+  .error{padding:20px;color:#fff;background:#600;font-family:system-ui}
 </style>
 </head>
 <body>
+<div id="root"></div>
 
 <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
 
 <script>
-console.log("3D page loaded for green {green_id}");
+console.log("3D page loaded for green {GREEN_ID}");
 
-async function loadGreenData() {{
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
-  try {{
+async function loadGreenData() {
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
+  try {
     const res = await fetch(url);
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const j = await res.json();
-    return j;
-  }} catch (e) {{
-    document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
+    return await res.json();
+  } catch (e) {
+    document.getElementById('root').innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
     console.error("Failed to load JSON:", e);
     throw e;
-  }}
-}}
+  }
+}
 
-async function main() {{
+async function main() {
   let data;
-  try {{
+  try {
     data = await loadGreenData();
-  }} catch (e) {{
+  } catch (e) {
     return;
-  }}
+  }
 
   const heights = data.heights;
   const W = data.grid_width || 36;
   const H = data.grid_height || 36;
 
-  if (!Array.isArray(heights) || heights.length === 0) {{
-    document.body.innerHTML = "<div class='error'>heights が空または不正です</div>";
+  if (!Array.isArray(heights) || heights.length === 0) {
+    document.getElementById('root').innerHTML = "<div class='error'>heights が空または不正です</div>";
     console.error("Invalid heights:", heights);
     return;
-  }}
+  }
 
-  // Three.js 初期化
+  // シーン
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, -80, 70);
+
+  // OrthographicCamera を使って遠近感を無くす（平面的に見える）
+  const w = document.documentElement.clientWidth;
+  const h = document.documentElement.clientHeight;
+  const aspect = w / h;
+  const viewSize = 40; // 表示スケール（調整可）
+  const left = -viewSize * aspect / 2;
+  const right = viewSize * aspect / 2;
+  const top = viewSize / 2;
+  const bottom = -viewSize / 2;
+  const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
+  camera.position.set(0, 0, 100); // 上から見るイメージ
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+  // レンダラ
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  renderer.setSize(w, h);
+  document.getElementById('root').appendChild(renderer.domElement);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(30, -30, 50);
-  scene.add(light);
-
-  const ambient = new THREE.AmbientLight(0x888888);
-  scene.add(ambient);
-
+  // ライトは不要（MeshBasicMaterial を使うため）
+  // geometry
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
-
   const verts = geometry.attributes.position;
-  for (let i = 0; i < verts.count; i++) {{
+  const HEIGHT_SCALE = 0.08; // 平面寄り。小さくするとより平坦に見える
+
+  for (let i = 0; i < verts.count; i++) {
     const x = i % W;
     const y = Math.floor(i / W);
-
-    if (!heights[y] || heights[y][x] === undefined) {{
-      console.warn("heights out of range at", x, y);
-      verts.setZ(i, 0);
-      continue;
-    }}
-
-    const h = heights[y][x] * 0.12;
-    verts.setZ(i, h);
-  }}
+    let hval = 0;
+    if (heights[y] && heights[y][x] !== undefined) {
+      hval = heights[y][x] * HEIGHT_SCALE;
+    }
+    verts.setZ(i, hval);
+  }
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55, side: THREE.DoubleSide }});
+  // 平面的に見せるためにライト不要の Basic マテリアルを使用
+  const material = new THREE.MeshBasicMaterial({ color: 0x55aa55 });
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  // 軽い回転で視認性を向上（必要なければ削除）
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.rotation.z = Math.PI;
+  // ワイヤーフレームを薄く重ねると地形が読みやすい
+  const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({ color:0x003300, wireframe:true, opacity:0.25, transparent:true }));
+  wire.rotation.x = -Math.PI / 2;
+  scene.add(wire);
 
-  function animate() {{
+  // 描画ループ
+  function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
-  }}
+  }
   animate();
 
   // リサイズ対応
-  window.addEventListener('resize', () => {{
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }});
-}}
+  let resizeTimeout = null;
+  window.addEventListener('resize', () => {
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      const w2 = document.documentElement.clientWidth;
+      const h2 = document.documentElement.clientHeight;
+      const aspect2 = w2 / h2;
+      const left2 = -viewSize * aspect2 / 2;
+      const right2 = viewSize * aspect2 / 2;
+      camera.left = left2;
+      camera.right = right2;
+      camera.top = viewSize / 2;
+      camera.bottom = -viewSize / 2;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w2, h2);
+      renderer.render(scene, camera);
+    }, 120);
+  });
+}
 
-main();
+main().catch(e => {
+  document.getElementById('root').innerHTML = "<div class='error'>3D エラー: " + e + "</div>";
+  console.error(e);
+});
 </script>
 
 </body>
 </html>
 """
+    return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
 
