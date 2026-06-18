@@ -315,120 +315,35 @@ def green_ui():
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Green - ピン登録 & AI戦略</title>
-
 <style>
-  :root{
-    --bg:#111;
-    --panel:#1b1b1b;
-    --accent:#2196F3;
-    --ok:#4CAF50;
-    --text:#fff;
-    --touch:56px;
+  body { background:#222; color:white; font-size:20px; text-align:center; margin:0; padding:10px; }
+  #canvas { touch-action: manipulation; border:1px solid #555; }
+  button {
+    font-size:22px; padding:12px 24px; margin-top:10px;
+    background:#4CAF50; border:none; color:white; border-radius:6px;
+    width:90%;
   }
-
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family:system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-    padding:10px;
+  #result {
+    margin-top:20px; padding:15px; background:#333; border-radius:8px;
+    white-space:pre-wrap; text-align:left;
   }
-
-  .header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    margin-bottom:10px;
-  }
-
-  .title{
-    font-size:18px;
-    margin:0;
-  }
-
-  .map-wrap{
+  iframe {
     width:100%;
-    display:flex;
-    justify-content:center;
-  }
-
-  canvas#canvas{
-    width:100%;
-    max-width:420px;
-    height:auto;
+    height:400px;
     border:1px solid #555;
     border-radius:8px;
-    background:#000;
-    touch-action:manipulation;
-  }
-
-  #result{
-    margin-top:10px;
-    padding:12px;
-    background:var(--panel);
-    border-radius:8px;
-    font-size:14px;
-    white-space:pre-wrap;
-    text-align:left;
-    max-height:28vh;
-    overflow:auto;
-  }
-
-  .action-bar{
-    position:fixed;
-    left:0;
-    right:0;
-    bottom:env(safe-area-inset-bottom, 0);
-    display:flex;
-    gap:8px;
-    padding:8px;
-    background:rgba(0,0,0,0.6);
-    justify-content:center;
-    z-index:9999;
-  }
-
-  .btn{
-    height:var(--touch);
-    min-width:44%;
-    border-radius:10px;
-    font-size:18px;
-    border:none;
-    color:var(--text);
-  }
-
-  .btn-save{ background:var(--ok); }
-  .btn-ai{ background:var(--accent); }
-
-  #toggle3d{
-    margin-top:10px;
-    width:100%;
-    max-width:420px;
-    background:#333;
-    color:#fff;
-    border-radius:8px;
-    padding:10px;
-    border:none;
-  }
-
-  iframe{
-    width:100%;
-    max-width:420px;
-    height:260px;
-    border-radius:8px;
-    border:1px solid #555;
-    display:none;
-    margin-top:8px;
+    margin-top:20px;
   }
 </style>
 </head>
-
 <body>
 
-<div class="header">
-  <h2 class="title">Green - ピン登録 & AI戦略</h2>
-  <select id="holeSelect" style="font-size:16px; padding:6px;">
+<h2>Green - ピン登録 & AI戦略</h2>
+
+<div style="margin: 10px;">
+  <label for="holeSelect">ホール選択：</label>
+  <select id="holeSelect" style="font-size:20px; padding:4px;">
     <option value="1">Hole 1</option>
     <option value="2">Hole 2</option>
     <option value="3">Hole 3</option>
@@ -450,21 +365,17 @@ def green_ui():
   </select>
 </div>
 
-<div class="map-wrap">
-  <canvas id="canvas" width="360" height="360"></canvas>
-</div>
+<canvas id="canvas" width="360" height="360"></canvas>
 
-<p id="info" style="font-size:14px;">ピン位置をタップしてください</p>
+<p id="info">ピン位置をタップしてください</p>
+
+<button id="saveBtn" style="display:none;">この位置を登録する</button>
+<button id="aiBtn" style="display:none; background:#2196F3;">AI に戦略を聞く</button>
 
 <div id="result"></div>
 
-<button id="toggle3d">3D 表示を開く</button>
+<h3 style="margin-top:30px;">3D グリーン（参考表示）</h3>
 <iframe id="view3d" src="/green/1/3d"></iframe>
-
-<div class="action-bar">
-  <button id="saveBtn" class="btn btn-save" style="display:none;">登録</button>
-  <button id="aiBtn" class="btn btn-ai" style="display:none;">AI戦略</button>
-</div>
 
 <script>
 let selectedX = null;
@@ -479,227 +390,173 @@ const ctx = canvas.getContext("2d");
 const saveBtn = document.getElementById("saveBtn");
 const aiBtn = document.getElementById("aiBtn");
 const iframe = document.getElementById("view3d");
-const toggle3d = document.getElementById("toggle3d");
 
 const img = new Image();
 img.src = greenImageUrl;
-img.onload = () => redraw();
+img.onload = () => {
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+};
 
-function redraw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  if(selectedX !== null){
+holeSelect.addEventListener("change", function() {
+    currentHole = parseInt(this.value);
+
+    greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
+    img.src = greenImageUrl;
+
+    iframe.src = "/green/" + currentHole + "/3d";
+
+    selectedX = null;
+    selectedY = null;
+    saveBtn.style.display = "none";
+    aiBtn.style.display = "none";
+    document.getElementById("info").innerText = "ピン位置をタップしてください";
+    document.getElementById("result").innerText = "";
+
+    img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+});
+
+canvas.addEventListener("click", function(e) {
+    const rect = canvas.getBoundingClientRect();
+    selectedX = Math.floor((e.clientX - rect.left) / 10);
+    selectedY = Math.floor((e.clientY - rect.top) / 10);
+
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     ctx.beginPath();
     ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
     ctx.fillStyle = "red";
     ctx.fill();
-  }
-}
 
-holeSelect.addEventListener("change", function() {
-  currentHole = parseInt(this.value);
-  greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
-  img.src = greenImageUrl;
+    document.getElementById("info").innerText =
+        `選択中のピン位置: (${selectedX}, ${selectedY})`;
 
-  iframe.src = "/green/" + currentHole + "/3d";
-
-  selectedX = null;
-  selectedY = null;
-  saveBtn.style.display = "none";
-  aiBtn.style.display = "none";
-  document.getElementById("info").innerText = "ピン位置をタップしてください";
-  document.getElementById("result").innerText = "";
-});
-
-canvas.addEventListener("click", function(e) {
-  const rect = canvas.getBoundingClientRect();
-  selectedX = Math.floor((e.clientX - rect.left) / 10);
-  selectedY = Math.floor((e.clientY - rect.top) / 10);
-
-  redraw();
-
-  document.getElementById("info").innerText =
-      `選択中のピン位置: (${selectedX}, ${selectedY})`;
-
-  saveBtn.style.display = "block";
+    saveBtn.style.display = "block";
 });
 
 saveBtn.addEventListener("click", async function() {
-  await fetch("/set_pin/" + currentHole, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x: selectedX, y: selectedY })
-  });
+    await fetch("/set_pin/" + currentHole, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: selectedX, y: selectedY })
+    });
 
-  document.getElementById("info").innerText =
-      "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
-
-  aiBtn.style.display = "block";
+    document.getElementById("info").innerText =
+        "ピン位置 (" + selectedX + ", " + selectedY + ") を登録しました！";
+    
+    aiBtn.style.display = "block";
 });
 
 aiBtn.addEventListener("click", async function() {
-  document.getElementById("result").innerText = "AI が戦略を計算中です…";
+    document.getElementById("result").innerText = "AI が戦略を計算中です…";
 
-  const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
-  const data = await res.json();
+    const res = await fetch("/ai_strategy/" + currentHole, { method: "POST" });
+    if (!res.ok) {
+      const text = await res.text();
+      document.getElementById("result").innerText = "サーバーエラー: " + text;
+      return;
+    }
 
-  let text = "";
-  text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
-  text += "🧠 戦略:\\n" + data.strategy;
+    const data = await res.json();
 
-  document.getElementById("result").innerText = text;
+    if (!data.slope_analysis || !data.strategy) {
+      document.getElementById("result").innerText = "レスポンス形式が不正です";
+      return;
+    }
 
-  redraw();
+    let text = "";
+    text += "⛰️ 傾斜の解説:\\n" + data.slope_analysis + "\\n\\n";
+    text += "🧠 戦略:\\n" + data.strategy;
+
+    document.getElementById("result").innerText = text;
+
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(selectedX * 10, selectedY * 10, 6, 0, Math.PI * 2);
+    ctx.fillStyle = "red";
+    ctx.fill();
 });
-
-toggle3d.addEventListener("click", function(){
-  // computed style を使って現在の表示状態を取得する（CSS 由来の display を正しく判定）
-  const currentDisplay = window.getComputedStyle(iframe).display;
-
-  if (currentDisplay === "none") {
-    // 表示する（初回ロード遅延を使いたい場合はここで iframe.src を設定する実装に変更可能）
-    iframe.style.display = "block";
-    // 高さを確保（スマホ縦画面で見切れないように）
-    iframe.style.height = Math.max(window.innerHeight * 0.45, 240) + "px";
-    toggle3d.innerText = "3D 表示を閉じる";
-  } else {
-    iframe.style.display = "none";
-    toggle3d.innerText = "3D 表示を開く";
-  }
-});
-
 </script>
 
 </body>
 </html>
 """
 
-
 # ============================================================
 # 3D 表示（汎用：1〜18）
 # ============================================================
-from fastapi.responses import HTMLResponse
-
 @app.get("/green/{green_id}/3d", response_class=HTMLResponse)
 def green_3d(green_id: int):
-    html = """
+    return f"""
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Green {GREEN_ID} - 3D View</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Green {green_id} - 3D View</title>
 <style>
-  html,body{height:100%;margin:0;background:#222;color:#fff}
-  #root{width:100%;height:100%;overflow:hidden}
-  canvas{display:block;width:100%;height:100%}
-  .error{padding:20px;color:#fff;background:#600;font-family:system-ui}
+  body {{ margin: 0; overflow: hidden; background: #222; }}
+  canvas {{ display: block; }}
 </style>
 </head>
 <body>
-<div id="root"></div>
 
-<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 
 <script>
-async function loadGreenData() {
-  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{GREEN_ID}.json";
+async function loadGreenData() {{
+  const url = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_{green_id}.json";
   const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
   return await res.json();
-}
+}}
 
-async function main() {
+async function main() {{
   const data = await loadGreenData();
   const heights = data.heights;
-  const W = data.grid_width || 36;
-  const H = data.grid_height || 36;
-
-  const w = document.documentElement.clientWidth;
-  const h = document.documentElement.clientHeight;
-  const aspect = w / h;
-  const viewSize = 22;
-
-  const left = -viewSize * aspect / 2;
-  const right = viewSize * aspect / 2;
-  const top = viewSize / 2;
-  const bottom = -viewSize / 2;
-
-  const camera = new THREE.OrthographicCamera(left, right, top, bottom, -1000, 1000);
-
-  // ★ 立体感が出る角度
-  camera.position.set(0, -40, 80);
-  camera.lookAt(0, 0, 0);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.setSize(w, h);
-  document.getElementById('root').appendChild(renderer.domElement);
+  const W = data.grid_width;
+  const H = data.grid_height;
 
   const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, -60, 40);
+  camera.lookAt(0, 0, 0);
 
-  // ★ 立体感が出るライト
-  const light = new THREE.DirectionalLight(0xffffff, 1.2);
-  light.position.set(50, -50, 80);
+  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(30, -30, 50);
   scene.add(light);
-  scene.add(new THREE.AmbientLight(0x666666));
+
+  const ambient = new THREE.AmbientLight(0x888888);
+  scene.add(ambient);
 
   const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+
   const verts = geometry.attributes.position;
-
-  // ★ 高さを強調（線にならず、立体感が出る）
-  const HEIGHT_SCALE = 0.28;
-
-  for (let i = 0; i < verts.count; i++) {
+  for (let i = 0; i < verts.count; i++) {{
     const x = i % W;
     const y = Math.floor(i / W);
-    const hval = heights[y][x] * HEIGHT_SCALE;
-    verts.setZ(i, hval);
-  }
+    const h = heights[y][x] * 0.3;
+    verts.setZ(i, h);
+  }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshLambertMaterial({
+  const material = new THREE.MeshLambertMaterial({{
     color: 0x55aa55,
     side: THREE.DoubleSide
-  });
+  }});
 
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
-  const wire = new THREE.Mesh(
-    geometry.clone(),
-    new THREE.MeshBasicMaterial({
-      color:0x003300,
-      wireframe:true,
-      opacity:0.25,
-      transparent:true
-    })
-  );
-  wire.rotation.x = -Math.PI / 2;
-  scene.add(wire);
-
-  function animate() {
+  function animate() {{
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
-  }
+  }}
   animate();
-
-  window.addEventListener('resize', () => {
-    const w2 = document.documentElement.clientWidth;
-    const h2 = document.documentElement.clientHeight;
-    const aspect2 = w2 / h2;
-
-    camera.left = -viewSize * aspect2 / 2;
-    camera.right = viewSize * aspect2 / 2;
-    camera.top = viewSize / 2;
-    camera.bottom = -viewSize / 2;
-    camera.updateProjectionMatrix();
-
-    renderer.setSize(w2, h2);
-  });
-}
+}}
 
 main();
 </script>
@@ -707,5 +564,3 @@ main();
 </body>
 </html>
 """
-    return HTMLResponse(content=html.replace("{GREEN_ID}", str(green_id)))
-
