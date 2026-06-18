@@ -328,13 +328,8 @@ def green_ui():
     --touch:56px;
   }
 
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family:system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-    padding:10px;
-  }
+  html,body{height:100%;margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;box-sizing:border-box}
+  .container{padding:8px;box-sizing:border-box}
 
   .header{
     display:flex;
@@ -350,18 +345,23 @@ def green_ui():
 
   .map-wrap{
     width:100%;
+    max-width:100%;
+    padding:0;
+    margin:0 auto;
     display:flex;
     justify-content:center;
   }
 
+  /* canvas は親幅に追従 */
   canvas#canvas{
     width:100%;
-    max-width:420px;
+    max-width:none;
     height:auto;
     border:1px solid #555;
     border-radius:8px;
     background:#000;
     touch-action:manipulation;
+    box-sizing:border-box;
   }
 
   #result{
@@ -404,7 +404,7 @@ def green_ui():
   #toggle3d{
     margin-top:10px;
     width:100%;
-    max-width:420px;
+    max-width:none;
     background:#333;
     color:#fff;
     border-radius:8px;
@@ -412,63 +412,62 @@ def green_ui():
     border:none;
   }
 
-  /* 親ページ側：iframe を画面比で大きくする */
+  /* 親ページ側：iframe は初期非表示、高さは開くときに JS で設定 */
   iframe {
-  width: 100%;
-  /* max-width を削除または十分大きくする */
-  max-width: none;
-  /* 高さは画面の70%をデフォルトに */
-  height: 70vh;
-  border-radius: 8px;
-  border: 1px solid #555;
-  display: none;
-  margin-top: 8px;
-  box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    height: 0;
+    border-radius: 8px;
+    border: 1px solid #555;
+    display: none;
+    margin-top: 8px;
+    box-sizing: border-box;
   }
-  
 </style>
 </head>
 
 <body>
+<div class="container">
+  <div class="header">
+    <h2 class="title">Green - ピン登録 & AI戦略</h2>
+    <select id="holeSelect" style="font-size:16px; padding:6px;">
+      <option value="1">Hole 1</option>
+      <option value="2">Hole 2</option>
+      <option value="3">Hole 3</option>
+      <option value="4">Hole 4</option>
+      <option value="5">Hole 5</option>
+      <option value="6">Hole 6</option>
+      <option value="7">Hole 7</option>
+      <option value="8">Hole 8</option>
+      <option value="9">Hole 9</option>
+      <option value="10">Hole 10</option>
+      <option value="11">Hole 11</option>
+      <option value="12">Hole 12</option>
+      <option value="13">Hole 13</option>
+      <option value="14">Hole 14</option>
+      <option value="15">Hole 15</option>
+      <option value="16">Hole 16</option>
+      <option value="17">Hole 17</option>
+      <option value="18">Hole 18</option>
+    </select>
+  </div>
 
-<div class="header">
-  <h2 class="title">Green - ピン登録 & AI戦略</h2>
-  <select id="holeSelect" style="font-size:16px; padding:6px;">
-    <option value="1">Hole 1</option>
-    <option value="2">Hole 2</option>
-    <option value="3">Hole 3</option>
-    <option value="4">Hole 4</option>
-    <option value="5">Hole 5</option>
-    <option value="6">Hole 6</option>
-    <option value="7">Hole 7</option>
-    <option value="8">Hole 8</option>
-    <option value="9">Hole 9</option>
-    <option value="10">Hole 10</option>
-    <option value="11">Hole 11</option>
-    <option value="12">Hole 12</option>
-    <option value="13">Hole 13</option>
-    <option value="14">Hole 14</option>
-    <option value="15">Hole 15</option>
-    <option value="16">Hole 16</option>
-    <option value="17">Hole 17</option>
-    <option value="18">Hole 18</option>
-  </select>
-</div>
+  <div class="map-wrap">
+    <canvas id="canvas" width="360" height="360"></canvas>
+  </div>
 
-<div class="map-wrap">
-  <canvas id="canvas" width="360" height="360"></canvas>
-</div>
+  <p id="info" style="font-size:14px;">ピン位置をタップしてください</p>
 
-<p id="info" style="font-size:14px;">ピン位置をタップしてください</p>
+  <div id="result"></div>
 
-<div id="result"></div>
+  <button id="toggle3d">3D 表示を開く</button>
+  <!-- data-loaded 属性で遅延ロード制御 -->
+  <iframe id="view3d" data-loaded="false"></iframe>
 
-<button id="toggle3d">3D 表示を開く</button>
-<iframe id="view3d" src="/green/1/3d"></iframe>
-
-<div class="action-bar">
-  <button id="saveBtn" class="btn btn-save" style="display:none;">登録</button>
-  <button id="aiBtn" class="btn btn-ai" style="display:none;">AI戦略</button>
+  <div class="action-bar">
+    <button id="saveBtn" class="btn btn-save" style="display:none;">登録</button>
+    <button id="aiBtn" class="btn btn-ai" style="display:none;">AI戦略</button>
+  </div>
 </div>
 
 <script>
@@ -487,6 +486,7 @@ const iframe = document.getElementById("view3d");
 const toggle3d = document.getElementById("toggle3d");
 
 const img = new Image();
+img.crossOrigin = "anonymous";
 img.src = greenImageUrl;
 img.onload = () => redraw();
 
@@ -506,7 +506,9 @@ holeSelect.addEventListener("change", function() {
   greenImageUrl = "https://pcbdiagnosisrga8a5.blob.core.windows.net/course-maps/green_" + currentHole + ".png";
   img.src = greenImageUrl;
 
-  iframe.src = "/green/" + currentHole + "/3d";
+  // 遅延ロードを使う場合は data-loaded を false にしておく
+  iframe.removeAttribute("src");
+  iframe.setAttribute("data-loaded", "false");
 
   selectedX = null;
   selectedY = null;
@@ -564,19 +566,28 @@ toggle3d.addEventListener("click", function(){
     // 表示する
     iframe.style.display = "block";
 
-    // 親ページ側で高さを確実に確保（スマホ縦画面向け）
-    iframe.style.height = Math.max(window.innerHeight * 0.75, 320) + "px";
-
-    // 幅も念のため確保（親の制約がある場合に上書き）
+    // 幅と高さを明示的に上書き（スマホ縦画面で見切れないように）
     iframe.style.width = "100%";
+    iframe.style.height = Math.max(window.innerHeight * 0.75, 360) + "px";
+
+    // 遅延ロード: 未ロードなら src を設定して読み込む
+    if (iframe.getAttribute("data-loaded") !== "true") {
+      iframe.src = "/green/" + currentHole + "/3d";
+      iframe.setAttribute("data-loaded", "true");
+    }
 
     toggle3d.innerText = "3D 表示を閉じる";
+
+    // 親ページの resize をトリガして iframe 内の描画が追従するようにする
+    setTimeout(() => { try { window.dispatchEvent(new Event('resize')); } catch(e) {} }, 200);
+
   } else {
+    // 非表示にする
     iframe.style.display = "none";
+    iframe.style.height = "0";
     toggle3d.innerText = "3D 表示を開く";
   }
 });
-
 </script>
 
 </body>
