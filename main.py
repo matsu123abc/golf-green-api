@@ -597,7 +597,7 @@ def green_3d(green_id: int):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body {{ margin: 0; overflow: hidden; background: #222; color: #fff; }}
-  canvas {{ display: block; }}
+  canvas {{ display: block; width:100%; height:100%; }}
   .error {{ padding:20px; color:#fff; background:#600; font-family:system-ui; }}
 </style>
 </head>
@@ -613,8 +613,7 @@ async function loadGreenData() {{
   try {{
     const res = await fetch(url);
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const j = await res.json();
-    return j;
+    return await res.json();
   }} catch (e) {{
     document.body.innerHTML = "<div class='error'>JSON 読み込み失敗: " + e + "</div>";
     console.error("Failed to load JSON:", e);
@@ -640,53 +639,79 @@ async function main() {{
     return;
   }}
 
+  // シーンとカメラ（カメラはやや俯瞰）
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(45, (document.documentElement.clientWidth || window.innerWidth) / (document.documentElement.clientHeight || window.innerHeight), 0.1, 2000);
   camera.position.set(0, -120, 200);
   camera.lookAt(0, 0, 0);
 
-  // renderer の生成
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // レンダラ（iframe の実サイズに合わせる）
+  const renderer = new THREE.WebGLRenderer({{ antialias: true }});
   renderer.setPixelRatio(window.devicePixelRatio || 1);
 
-  // 初回サイズはドキュメントのクライアントサイズを使う
-  function getClientWidth() { return document.documentElement.clientWidth || window.innerWidth; }
-  function getClientHeight() { return document.documentElement.clientHeight || window.innerHeight; }
+  function getClientWidth() {{ return document.documentElement.clientWidth || window.innerWidth; }}
+  function getClientHeight() {{ return document.documentElement.clientHeight || window.innerHeight; }}
 
   renderer.setSize(getClientWidth(), getClientHeight());
   document.body.appendChild(renderer.domElement);
 
-  // リサイズ対応（iframe のサイズ変更に追従）
-  window.addEventListener('resize', () => {
-  const w = getClientWidth();
-  const h = getClientHeight();
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  });
+  // ライト
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(30, -30, 50);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0x888888));
 
+  // ジオメトリ生成（ここが抜けていると描画できない）
+  const geometry = new THREE.PlaneGeometry(36, 36, W - 1, H - 1);
+  const verts = geometry.attributes.position;
+  const HEIGHT_SCALE = 0.08; // 平面的にしたければ 0.08 -> 0.05 などに下げる
+
+  for (let i = 0; i < verts.count; i++) {{
+    const x = i % W;
+    const y = Math.floor(i / W);
+    let h = 0;
+    if (heights[y] && heights[y][x] !== undefined) {{
+      h = heights[y][x] * HEIGHT_SCALE;
+    }} else {{
+      console.warn("heights missing at", x, y);
+    }}
+    verts.setZ(i, h);
+  }}
   verts.needsUpdate = true;
   geometry.computeVertexNormals();
 
+  // マテリアルとメッシュ
   const material = new THREE.MeshLambertMaterial({{ color: 0x55aa55 }});
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   scene.add(mesh);
 
+  // ワイヤーフレーム（等高線風）
   const wire = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({{ color:0x003300, wireframe:true, opacity:0.25, transparent:true }}));
   wire.rotation.x = -Math.PI / 2;
   scene.add(wire);
 
+  // アニメーションループ
   function animate() {{
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
   }}
   animate();
 
+  // リサイズ対応（iframe のサイズ変更に追従）
+  let resizeTimeout = null;
   window.addEventListener('resize', () => {{
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    // throttle
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {{
+      const w = getClientWidth();
+      const h = getClientHeight();
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      // optional: 再描画を確実にする
+      renderer.render(scene, camera);
+    }}, 120);
   }});
 }}
 
